@@ -1,0 +1,27 @@
+# data cache — large parquet files, never commit
+data/
+outputs/
+runs/
+
+# credentials — NEVER commit
+.env
+*.env
+secrets.py
+*_api_key*
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
