@@ -108,6 +108,37 @@ INSTRUMENTS: dict[str, dict] = {
         "description":       "Ether futures (50 ETH)",
         "asset_class":       "crypto",
     },
+    # ── Forex ────────────────────────────────────────────────────────────
+    # CME FX futures (GLBX.MDP3). Both quoted as USD per foreign unit.
+    # Inverting to "USD/JPY" display requires 1/(6J price) — irrelevant
+    # for the strategy; ORB trades the breakout direction symmetrically.
+    #
+    # Session rationale:
+    #   6E: London open (08:00 BST) is the dominant EUR/USD event;
+    #       NY open adds a second meaningful session.
+    #       TOK excluded — 09:00 JST ≈ 00:00 UTC, dead zone for EUR.
+    #   6J: Tokyo open (09:00 JST) is the primary JPY event (BoJ,
+    #       Japanese data releases). All three sessions are relevant.
+    "6E": {
+        "tick_size":         0.00005,
+        "tick_value_usd":    6.25,             # 125,000 EUR × $0.00005
+        "continuous_symbol": "6E.c.0",
+        "sessions":          ["LDN", "NY"],
+        "has_local_data":    False,
+        "data_start":        "2019-01-01",
+        "description":       "Euro FX futures (125,000 EUR) — EUR/USD",
+        "asset_class":       "forex",
+    },
+    "6J": {
+        "tick_size":         0.0000005,
+        "tick_value_usd":    6.25,             # 12,500,000 JPY × $0.0000005
+        "continuous_symbol": "6J.c.0",
+        "sessions":          ["TOK", "LDN", "NY"],
+        "has_local_data":    False,
+        "data_start":        "2019-01-01",
+        "description":       "Japanese Yen futures (12,500,000 JPY) — USD/JPY inverse",
+        "asset_class":       "forex",
+    },
 }
 
 # ── Sessions ───────────────────────────────────────────────────────────────
