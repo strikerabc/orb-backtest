@@ -54,13 +54,15 @@ def run() -> None:
     # ── 1. Load / build data ───────────────────────────────────────────────
     data: dict[str, pd.DataFrame] = {}
     daily: dict[str, pd.DataFrame] = {}
-    for sym in INSTRUMENTS:
+    for sym, instr in INSTRUMENTS.items():
         df_1m   = ensure_data(sym, api_key)
         df_1d   = ensure_daily(sym, api_key)
-        df_enr  = _compute_enrichment(df_1m, df_1d)
+        df_enr  = _compute_enrichment(df_1m, df_1d,
+                                      tick_size=instr["tick_size"])
         data[sym]  = df_enr
         daily[sym] = df_1d
-        log.info("%s: %d bars enriched", sym, len(df_enr))
+        log.info("%s (%s): %d bars enriched",
+                 sym, instr.get("asset_class", "?"), len(df_enr))
 
     # ── 2. Select regime windows ───────────────────────────────────────────
     # Use the union of all data to determine span
@@ -76,7 +78,8 @@ def run() -> None:
     window_session_days: dict[tuple, list[SessionDay]] = {}  # (window_idx, sym, sess) → days
 
     for sym, df_full in data.items():
-        for sess_name in SESSIONS:
+        applicable_sessions = INSTRUMENTS[sym].get("sessions", list(SESSIONS.keys()))
+        for sess_name in applicable_sessions:
             for w in windows:
                 df_w = filter_to_window(df_full, w)
                 if len(df_w) == 0:

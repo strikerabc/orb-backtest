@@ -5,16 +5,108 @@ Edit this file to change any knob without touching algorithm code.
 from __future__ import annotations
 
 # ── Instruments ────────────────────────────────────────────────────────────
+#
+# Per-instrument fields
+# ---------------------
+# tick_size          : minimum price increment in native price units
+# tick_value_usd     : dollar value of one tick per contract
+# continuous_symbol  : Databento stype=continuous symbol for GLBX.MDP3
+# sessions           : sessions where this instrument shows meaningful open volatility
+# has_local_data     : True = merge Databento 2019-2022 with local Dukascopy 2023-2026
+#                      False = download full range from Databento (no local backup)
+# data_start         : earliest available / desired start date (ISO string)
+# description        : human-readable label
+# asset_class        : coarse grouping tag
+#
+# ZN price note: Databento normalises Treasury note prices to decimal points
+# (e.g. 110.515625) via display_factor. tick_size = 1/64 = 0.015625 pts,
+# tick_value = 0.015625 × $1,000 par-point = $15.625.
+#
 INSTRUMENTS: dict[str, dict] = {
+    # ── Equity index futures ─────────────────────────────────────────────
     "ES": {
-        "tick_size": 0.25,
-        "tick_value_usd": 12.50,     # $ per tick per contract
+        "tick_size":         0.25,
+        "tick_value_usd":    12.50,
         "continuous_symbol": "ES.c.0",
+        "sessions":          ["NY", "LDN", "TOK"],
+        "has_local_data":    True,
+        "data_start":        "2019-01-01",
+        "description":       "S&P 500 E-mini",
+        "asset_class":       "equity_index",
     },
     "NQ": {
-        "tick_size": 0.25,
-        "tick_value_usd": 5.00,
+        "tick_size":         0.25,
+        "tick_value_usd":    5.00,
         "continuous_symbol": "NQ.c.0",
+        "sessions":          ["NY", "LDN", "TOK"],
+        "has_local_data":    True,
+        "data_start":        "2019-01-01",
+        "description":       "Nasdaq-100 E-mini",
+        "asset_class":       "equity_index",
+    },
+    "RTY": {
+        "tick_size":         0.10,
+        "tick_value_usd":    5.00,
+        "continuous_symbol": "RTY.c.0",
+        "sessions":          ["NY"],           # small-cap: US open only
+        "has_local_data":    False,
+        "data_start":        "2019-01-01",
+        "description":       "Russell 2000 E-mini",
+        "asset_class":       "equity_index",
+    },
+    # ── Metals ───────────────────────────────────────────────────────────
+    "GC": {
+        "tick_size":         0.10,
+        "tick_value_usd":    10.00,            # 100 troy oz × $0.10
+        "continuous_symbol": "GC.c.0",
+        "sessions":          ["NY", "LDN", "TOK"],   # London gold fix proximity + Asian demand
+        "has_local_data":    False,
+        "data_start":        "2019-01-01",
+        "description":       "Gold futures (100 troy oz)",
+        "asset_class":       "metal",
+    },
+    # ── Energy ───────────────────────────────────────────────────────────
+    "CL": {
+        "tick_size":         0.01,
+        "tick_value_usd":    10.00,            # 1,000 bbl × $0.01
+        "continuous_symbol": "CL.c.0",
+        "sessions":          ["NY", "LDN"],    # thin at Tokyo open
+        "has_local_data":    False,
+        "data_start":        "2019-01-01",
+        "description":       "WTI Crude Oil (1,000 bbl)",
+        "asset_class":       "energy",
+    },
+    # ── Fixed income ─────────────────────────────────────────────────────
+    "ZN": {
+        "tick_size":         0.015625,         # 1/64 of a point
+        "tick_value_usd":    15.625,           # $1,000 × 1/64
+        "continuous_symbol": "ZN.c.0",
+        "sessions":          ["NY", "LDN"],    # negligible volatility at Tokyo open
+        "has_local_data":    False,
+        "data_start":        "2019-01-01",
+        "description":       "10-Year Treasury Note",
+        "asset_class":       "fixed_income",
+    },
+    # ── Crypto ───────────────────────────────────────────────────────────
+    "BTC": {
+        "tick_size":         5.00,
+        "tick_value_usd":    25.00,            # 5 BTC × $5.00/BTC
+        "continuous_symbol": "BTC.c.0",
+        "sessions":          ["NY", "LDN", "TOK"],   # CME futures trade ~23h
+        "has_local_data":    False,
+        "data_start":        "2019-01-01",     # CME BTC launched Dec 2017; 2019 for data hygiene
+        "description":       "Bitcoin futures (5 BTC)",
+        "asset_class":       "crypto",
+    },
+    "ETH": {
+        "tick_size":         0.05,
+        "tick_value_usd":    2.50,             # 50 ETH × $0.05/ETH
+        "continuous_symbol": "ETH.c.0",
+        "sessions":          ["NY", "LDN", "TOK"],
+        "has_local_data":    False,
+        "data_start":        "2021-02-08",     # CME Ether futures launch date
+        "description":       "Ether futures (50 ETH)",
+        "asset_class":       "crypto",
     },
 }
 

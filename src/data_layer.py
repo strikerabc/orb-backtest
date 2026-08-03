@@ -153,7 +153,8 @@ def _compute_atr_4h(df: pd.DataFrame, period: int = ATR_PERIOD) -> np.ndarray:
     return merged["atr_4h"].to_numpy(copy=True)
 
 
-def _compute_enrichment(df_1m: pd.DataFrame, df_1d: pd.DataFrame) -> pd.DataFrame:
+def _compute_enrichment(df_1m: pd.DataFrame, df_1d: pd.DataFrame,
+                        tick_size: float = 0.25) -> pd.DataFrame:
     """Add per-bar enrichment columns derived from 1d data and rolling 1m stats."""
     # ── daily enrichment (joined via ET date) ──────────────────────────────
     et = df_1d["timestamp"].dt.tz_convert("America/New_York") if df_1d is not None and len(df_1d) else None
@@ -162,7 +163,7 @@ def _compute_enrichment(df_1m: pd.DataFrame, df_1d: pd.DataFrame) -> pd.DataFram
         d["_date_et"] = et.dt.date
         d = d.sort_values("_date_et")
         d["prev_close"]     = d["close"].shift(1)
-        d["daily_range_ticks"] = (d["high"] - d["low"]) / 0.25
+        d["daily_range_ticks"] = (d["high"] - d["low"]) / tick_size
         # Parkinson estimator: Var = (ln H/L)^2 / (4 ln 2)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -222,6 +223,10 @@ def ensure_data(sym: str, api_key: str | None = None) -> pd.DataFrame:
     Return merged, enriched 1-minute DataFrame for sym.
     Loads from cache if available; builds cache on first call.
     api_key: Databento key; only needed if cache is missing.
+
+    Two download paths:
+      has_local_data=True  (ES, NQ): download 2019-2022, merge with local 2023-2026.
+      has_local_data=False (all new): download data_start → today from Databento only.
     """
     cache = _cache_path(sym, SCHEMA_1M)
     if cache.exists():
@@ -236,9 +241,19 @@ def ensure_data(sym: str, api_key: str | None = None) -> pd.DataFrame:
         raise ValueError("api_key required to build cache. "
                          "Set DATABENTO_API_KEY env var or pass explicitly.")
 
-    existing  = _load_existing_1m(sym)
-    downloaded = _download_databento(sym, DOWNLOAD_START, DOWNLOAD_END, api_key)
-    return _merge_and_cache(sym, existing, downloaded, api_key)
+    instr = INSTRUMENTS[sym]
+    if instr.get("has_local_data", False):
+        # Legacy path: Databento 2019-2022 + local Dukascopy 2023-2026
+        existing   = _load_existing_1m(sym)
+        downloaded = _download_databento(sym, DOWNLOAD_START, DOWNLOAD_END, api_key)
+        return _merge_and_cache(sym, existing, downloaded, api_key)
+    else:
+        # New instruments: no local backup — download full history from Databento
+        start = instr.get("data_start", DOWNLOAD_START)
+        end   = pd.Timestamp.now(tz="UTC").normalize().strftime("%Y-%m-%d")
+        log.info("%s: no local data — downloading %s → %s from Databento", sym, start, end)
+        downloaded = _download_databento(sym, start, end, api_key)
+        return _merge_and_cache(sym, pd.DataFrame(), downloaded, api_key)
 
 
 def ensure_daily(sym: str, api_key: str | None = None) -> pd.DataFrame:
@@ -260,9 +275,9 @@ def ensure_daily(sym: str, api_key: str | None = None) -> pd.DataFrame:
         raise ImportError("pip install databento")
 
     client = db.Historical(key=api_key)
-    # Pull full range for enrichment (2019-present)
-    start = DOWNLOAD_START
-    end   = pd.Timestamp.utcnow().strftime("%Y-%m-%d")
+    # Pull from per-instrument start to today for enrichment
+    start = INSTRUMENTS[sym].get("data_start", DOWNLOAD_START)
+    end   = pd.Timestamp.now(tz="UTC").normalize().strftime("%Y-%m-%d")
     data  = client.timeseries.get_range(
         dataset=DATASET, symbols=[INSTRUMENTS[sym]["continuous_symbol"]],
         schema=SCHEMA_1D, start=start, end=end, stype_in=STYPE,
