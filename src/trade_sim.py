@@ -13,8 +13,8 @@ from typing import Optional
 import numpy as np
 
 from src.config import (
-    ATR_CAP_MULTIPLE, COMMISSION_PER_SIDE_USD, INSTRUMENTS, RR_LEVELS,
-    SLIPPAGE_TICKS_ROUND_TRIP,
+    ATR_CAP_MULTIPLE, COMMISSION_PER_SIDE_USD, INSTRUMENTS, MIN_TP_TICKS,
+    RR_LEVELS, SLIPPAGE_TICKS_BY_SYMBOL, SLIPPAGE_TICKS_ROUND_TRIP,
 )
 from src.entry_detector import EntrySignal
 from src.range_builder import SessionDay
@@ -40,14 +40,26 @@ class TradeResult:
     same_bar_ambiguous: bool
     atr_exceeds_cap: bool
     tp_to_atr_ratio: Optional[float]
+    tp_ticks: float            # rr * r_ticks — TP distance from entry
+    tp_unfillable: bool        # True if tp_ticks < MIN_TP_TICKS (inside spread)
 
 
-def _round_cost_r(r_ticks: float, tick_value_usd: float) -> float:
-    """Total round-trip cost in R units (commission + slippage)."""
+def _round_cost_r(r_ticks: float, tick_value_usd: float,
+                  sym: str | None = None) -> float:
+    """
+    Total round-trip cost in R units (commission + slippage).
+
+    Slippage is looked up per symbol; one tick is not economically comparable
+    across instruments (ETH's tick is 0.0017% of price, ZN's is far larger
+    relative to typical stop distance). Falls back to the global constant when
+    the symbol has no entry.
+    """
     if r_ticks <= 0:
         return 0.0
+    slip = SLIPPAGE_TICKS_BY_SYMBOL.get(sym, SLIPPAGE_TICKS_ROUND_TRIP) \
+        if sym is not None else SLIPPAGE_TICKS_ROUND_TRIP
     comm_ticks = 2.0 * COMMISSION_PER_SIDE_USD / tick_value_usd
-    total_ticks = comm_ticks + SLIPPAGE_TICKS_ROUND_TRIP
+    total_ticks = comm_ticks + slip
     return total_ticks / r_ticks
 
 
@@ -70,7 +82,7 @@ def simulate_trade(
     r_ticks  = r / tick
     sign     = 1.0 if is_long else -1.0
 
-    cost_r   = _round_cost_r(r_ticks, tv_usd)
+    cost_r   = _round_cost_r(r_ticks, tv_usd, sd.instrument)
     atr      = sd.atr_4h
 
     if r <= 0 or r_ticks < 1:
@@ -97,6 +109,10 @@ def simulate_trade(
 
     for rr in rr_levels:
         tp_raw = entry + sign * rr * r
+        # TP distance in ticks. Below MIN_TP_TICKS the target sits inside the
+        # spread and cannot fill, yet the exit walk would record it as a win.
+        tp_ticks_val = rr * r_ticks
+        tp_unfillable_flag = bool(tp_ticks_val < MIN_TP_TICKS)
         tp_to_atr = (abs(tp_raw - entry) / atr) if (atr and not np.isnan(atr) and atr > 0) else None
         exceeds_cap = bool(tp_to_atr is not None and tp_to_atr > ATR_CAP_MULTIPLE)
         tp_used = tp_raw   # we always simulate; mark flag for post-analysis filtering
@@ -173,6 +189,8 @@ def simulate_trade(
             same_bar_ambiguous=same_bar_flag,
             atr_exceeds_cap=exceeds_cap,
             tp_to_atr_ratio=round(tp_to_atr, 4) if tp_to_atr else None,
+            tp_ticks=round(tp_ticks_val, 4),
+            tp_unfillable=tp_unfillable_flag,
         ))
 
     return results
@@ -186,4 +204,5 @@ def _invalid_result(rr: float, entry: float, sl: float, r_ticks: float) -> Trade
         gross_r=np.nan, net_r=np.nan, gross_usd=np.nan, net_usd=np.nan,
         mae_r=np.nan, mfe_r=np.nan, bars_held=0,
         same_bar_ambiguous=False, atr_exceeds_cap=False, tp_to_atr_ratio=None,
+        tp_ticks=np.nan, tp_unfillable=False,
     )

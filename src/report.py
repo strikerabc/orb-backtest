@@ -9,7 +9,41 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.config import MIN_TRADES_FOR_RANKING
+
 log = logging.getLogger("orb.report")
+
+# Columns shown in ranked tables, in display order. Filtered to those present
+# so the report still renders if null calibration was skipped.
+_RANK_COLS = [
+    "instrument", "session", "range_minutes", "entry_mode", "closure_tf",
+    "direction", "rr", "trade_count", "win_rate",
+    "expectancy_gross_r", "expectancy_net_r", "profit_factor",
+    "max_drawdown_r", "ci_lo_95", "ci_hi_95", "null_p_value",
+]
+
+
+def _cols(df: pd.DataFrame) -> list[str]:
+    return [c for c in _RANK_COLS if c in df.columns]
+
+
+def _safe_write(label: str, fn) -> bool:
+    """
+    Run a write fn, converting a file lock into a warning instead of a crash.
+
+    A single file held open by Excel used to abort write_report entirely,
+    losing every artefact after it. Each write is now independent.
+    """
+    try:
+        fn()
+        log.info("wrote %s", label)
+        return True
+    except PermissionError:
+        log.error("LOCKED, skipped: %s  (close it and run recover_report.py)", label)
+        return False
+    except Exception as exc:
+        log.error("FAILED %s: %s", label, exc)
+        return False
 
 
 def write_report(
@@ -17,23 +51,46 @@ def write_report(
     regime_summary: pd.DataFrame,
     trade_log: pd.DataFrame,
     output_dir: Path,
+    write_trade_log_csv: bool = False,
 ) -> None:
-    """Write all output artefacts: parquet, CSV, markdown."""
+    """
+    Write all output artefacts: parquet, CSV, markdown.
+
+    Order matters: cheap, high-value artefacts are written FIRST so a
+    failure late in the sequence cannot cost the summary or the report.
+
+    write_trade_log_csv: the trade-log CSV is ~1.2 GB at 3.4M rows and
+        exceeds Excel's 1,048,576-row limit, so it cannot be opened there
+        anyway. Parquet holds identical data at ~5% of the size. Off by
+        default; enable only if an external tool needs raw CSV.
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── trade log ──────────────────────────────────────────────────────────
-    trade_log.to_parquet(output_dir / "trade_log.parquet", index=False)
-    trade_log.to_csv(output_dir / "trade_log.csv", index=False)
-    log.info("Trade log: %d rows → %s", len(trade_log), output_dir / "trade_log.csv")
-
-    # ── summary tables ─────────────────────────────────────────────────────
-    summary.to_parquet(output_dir / "summary.parquet", index=False)
-    summary.to_csv(output_dir / "summary.csv", index=False)
-    regime_summary.to_parquet(output_dir / "regime_summary.parquet", index=False)
-    regime_summary.to_csv(output_dir / "regime_summary.csv", index=False)
+    # ── summary tables (small, most valuable) ──────────────────────────────
+    _safe_write("summary.parquet",
+                lambda: summary.to_parquet(output_dir / "summary.parquet", index=False))
+    _safe_write("summary.csv",
+                lambda: summary.to_csv(output_dir / "summary.csv", index=False))
+    _safe_write("regime_summary.parquet",
+                lambda: regime_summary.to_parquet(output_dir / "regime_summary.parquet", index=False))
+    _safe_write("regime_summary.csv",
+                lambda: regime_summary.to_csv(output_dir / "regime_summary.csv", index=False))
 
     # ── markdown report ────────────────────────────────────────────────────
-    _write_markdown(summary, regime_summary, trade_log, output_dir)
+    _safe_write("report.md",
+                lambda: _write_markdown(summary, regime_summary, trade_log, output_dir))
+
+    # ── trade log (large; parquet is the canonical artefact) ───────────────
+    _safe_write("trade_log.parquet",
+                lambda: trade_log.to_parquet(output_dir / "trade_log.parquet", index=False))
+    log.info("Trade log: %d rows → %s", len(trade_log), output_dir / "trade_log.parquet")
+
+    if write_trade_log_csv:
+        log.info("Writing trade_log.csv (~1.2 GB, several minutes)...")
+        _safe_write("trade_log.csv",
+                    lambda: trade_log.to_csv(output_dir / "trade_log.csv", index=False))
+    else:
+        log.info("Skipped trade_log.csv (write_trade_log_csv=False; parquet holds same data)")
 
 
 def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
@@ -43,44 +100,73 @@ def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
     n_atr   = int(trade_log["atr_exceeds_cap"].sum()) if "atr_exceeds_cap" in trade_log else 0
     n_amb   = int(trade_log["same_bar_ambiguous"].sum()) if "same_bar_ambiguous" in trade_log else 0
 
+    has_summary = (not summary.empty) and ("expectancy_gross_r" in summary.columns)
+
+    # Ranked tables use only variants with enough trades to be meaningful.
+    if has_summary and "trade_count" in summary.columns:
+        rankable = summary[summary["trade_count"] >= MIN_TRADES_FOR_RANKING]
+        n_excl   = len(summary) - len(rankable)
+    else:
+        rankable, n_excl = summary, 0
+
     lines = [
         "# ORB Backtest — Results Summary",
         f"\n**Total valid trades:** {n_total:,}  |  "
         f"**ATR-invalidated (flagged):** {n_atr:,}  |  "
         f"**Same-bar ambiguous:** {n_amb:,}",
         "",
-        "---",
-        "## Top 20 Variants by Gross Expectancy",
+        f"**Variants:** {len(summary):,} total  |  "
+        f"{len(rankable):,} rankable (>= {MIN_TRADES_FOR_RANKING} trades)  |  "
+        f"{n_excl:,} excluded as under-sampled",
         "",
     ]
 
-    if not summary.empty and "expectancy_gross_r" in summary.columns:
-        top = (summary
+    # ── data coverage ──────────────────────────────────────────────────────
+    if "instrument" in trade_log.columns:
+        lines += ["---", "## Data Coverage per Instrument", "",
+                  "Variants with too few trades indicate a data problem, not a",
+                  "strategy result. Check bar density before reading any row below.",
+                  ""]
+        cov = (trade_log.groupby("instrument", observed=True)
+                        .agg(rows=("exit_reason", "size"))
+                        .reset_index())
+        if has_summary and "trade_count" in summary.columns:
+            tc = (summary.groupby("instrument", observed=True)["trade_count"]
+                         .agg(variants="size", median_trades="median",
+                              max_trades="max")
+                         .reset_index())
+            cov = cov.merge(tc, on="instrument", how="outer")
+            cov["status"] = np.where(
+                cov["median_trades"] < MIN_TRADES_FOR_RANKING,
+                "UNDER-SAMPLED - investigate data", "ok")
+        lines.append(cov.sort_values("rows").to_markdown(index=False))
+        lines.append("")
+
+    lines += ["---",
+              f"## Top 20 Variants by Gross Expectancy (>= {MIN_TRADES_FOR_RANKING} trades)",
+              ""]
+
+    if has_summary and not rankable.empty:
+        top = (rankable
                .sort_values("expectancy_gross_r", ascending=False)
-               .head(20)
-               [["instrument","session","range_minutes","entry_mode","closure_tf",
-                 "direction","rr","trade_count","win_rate",
-                 "expectancy_gross_r","expectancy_net_r","profit_factor",
-                 "max_drawdown_r","ci_lo_95","ci_hi_95"]]
+               .head(20)[_cols(rankable)]
                .round(4))
         lines.append(top.to_markdown(index=False))
+    elif has_summary:
+        lines.append(f"*(no variant reached {MIN_TRADES_FOR_RANKING} trades)*")
     else:
         lines.append("*(summary not available)*")
 
     lines += [
         "",
         "---",
-        "## Bottom 20 Variants by Gross Expectancy",
+        f"## Bottom 20 Variants by Gross Expectancy (>= {MIN_TRADES_FOR_RANKING} trades)",
         "",
     ]
-    if not summary.empty and "expectancy_gross_r" in summary.columns:
-        bot = (summary
+    if has_summary and not rankable.empty:
+        bot = (rankable
                .sort_values("expectancy_gross_r", ascending=True)
-               .head(20)
-               [["instrument","session","range_minutes","entry_mode","closure_tf",
-                 "direction","rr","trade_count","win_rate",
-                 "expectancy_gross_r","expectancy_net_r","profit_factor",
-                 "max_drawdown_r","ci_lo_95","ci_hi_95"]]
+               .head(20)[_cols(rankable)]
                .round(4))
         lines.append(bot.to_markdown(index=False))
 
@@ -108,6 +194,15 @@ def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
         "",
         "---",
         "## Notes",
+        f"- **Ranked tables require >= {MIN_TRADES_FOR_RANKING} trades.** Without this filter, "
+        "variants that fired once and won sort to the top with `win_rate=1.0`, "
+        "`profit_factor=9999` (sentinel for zero losing trades) and a degenerate "
+        "`ci_lo == ci_hi` (bootstrap returns the point estimate twice when "
+        "`trade_count < block`). Those are small-sample arithmetic, not edges.",
+        "- summary.parquet/csv contain ALL variants including under-sampled ones; "
+        "the filter applies only to ranked tables here.",
+        "- Check the coverage table before trusting any instrument: a low median "
+        "trade count means missing bars upstream, not a strategy finding.",
         "- All R values are gross unless labelled net.",
         "- `atr_exceeds_cap` flag marks trades where TP > 2.5 × 4h ATR (simulated anyway; filter in analysis).",
         "- `same_bar_ambiguous` flag: SL and TP both hit within entry bar — SL assumed first (conservative).",

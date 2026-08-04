@@ -187,9 +187,43 @@ SWING_MIN_SL_TICKS: int       = 4     # minimum stop distance in ticks (floor)
 # ── Cost Model (controllable) ──────────────────────────────────────────────
 # Set COMMISSION_PER_SIDE_USD = 0 and SLIPPAGE_TICKS = 0 for frictionless gross.
 COMMISSION_PER_SIDE_USD: float = 2.50    # per contract per side (one-way)
-SLIPPAGE_TICKS_ROUND_TRIP: int = 1       # total ticks lost on round-trip execution
+SLIPPAGE_TICKS_ROUND_TRIP: int = 1       # fallback when spread_ticks absent
 # net_r = gross_r - (round_trip_cost_in_R)
 # where round_trip_cost_ticks = slippage_ticks + 2*(commission / tick_value)
+
+# Per-instrument round-trip slippage in TICKS.
+#
+# Why this is not one global constant: a flat "1 tick" is honest only where the
+# real bid-ask genuinely is one tick. Tick granularity varies enormously here.
+# CME ETH has tick_size=0.05 on a ~$3,000 asset -- one tick is 0.0017% of price,
+# so a flat 1 tick undercharges ETH by roughly an order of magnitude and made it
+# the only instrument to "survive" costs in the first 10-instrument sweep.
+#
+# Values below are ESTIMATES of typical round-trip spread cost, not measured.
+# ohlcv-1m carries no bid/ask, so measuring them requires the mbp-1 or tbbo
+# schema (additional Databento spend). Treat as an assumption to be calibrated,
+# and note that results for ETH/BTC are sensitive to it.
+SLIPPAGE_TICKS_BY_SYMBOL: dict[str, float] = {
+    "ES":  1.0,    # 1-tick market, extremely liquid
+    "NQ":  1.0,
+    "RTY": 1.0,
+    "GC":  1.0,
+    "CL":  1.0,
+    "ZN":  1.0,    # 1/64 market, tight
+    "6E":  1.0,
+    "6J":  1.0,
+    "BTC": 2.0,    # tick $5; spread often $5-25
+    "ETH": 10.0,   # tick $0.05; spread commonly $0.50+ -> ~10 ticks
+}
+
+# Minimum fillable take-profit distance, in ticks.
+#
+# A TP closer than one tick to entry sits inside the spread and cannot fill,
+# yet the exit walk records it as a win. This was inflating ZN at rr=0.25,
+# where 44.4% of trades had sub-tick targets and win rate read 0.86.
+# Trades below this threshold are flagged via `tp_unfillable` (kept, not
+# dropped -- same convention as atr_exceeds_cap) so they can be filtered.
+MIN_TP_TICKS: float = 1.0
 
 # ── Regime Sampling ────────────────────────────────────────────────────────
 REGIME_SEED: int            = 42
@@ -203,6 +237,35 @@ HOLDOUT_MONTHS: int         = 3   # most-recent N months excluded from all windo
 # ── Null Calibrator ────────────────────────────────────────────────────────
 BOOTSTRAP_N: int            = 1000
 BOOTSTRAP_BLOCK_SIZE_DAYS: int = 5    # block-bootstrap block length
+
+# Random-entry null benchmark.
+#
+# The p-value must compare LIKE WITH LIKE: an observed MEAN against a
+# distribution of null MEANS. The original implementation compared the
+# observed mean against a pool of INDIVIDUAL random-trade outcomes, which
+# made the statistic track the random-entry TP hit rate instead of tail
+# probability (corr with win_rate = +0.99, corr with expectancy = -0.10),
+# putting a hard floor near 1/(1+rr) so p < 0.05 was unreachable.
+#
+# Corrected design: draw N_NULL_DRAWS_PER_DAY random entries per session-day
+# to build a null trade pool, then block-bootstrap that pool at the observed
+# variant's sample size to obtain a distribution of null means.
+N_NULL_DRAWS_PER_DAY: int   = 3    # random entries generated per session-day
+NULL_SAMPLE_DAYS: int       = 500  # session-days sampled per null pool
+NULL_BOOTSTRAP_N: int       = 1000 # resamples when building null-mean dist
+
+# ── Reporting ──────────────────────────────────────────────────────────────
+# Minimum trades before a variant may appear in a RANKED table.
+#
+# Without this, variants that fired once and won sort to the top with
+# win_rate=1.0, profit_factor=9999 (stats.py: no losses -> sentinel) and a
+# degenerate CI where ci_lo == ci_hi (stats.py: len < block -> point estimate
+# twice). Those are arithmetic artefacts of tiny samples, not edges.
+#
+# 100 keeps ~76% of variants in the current sweep and gives a standard error
+# near +/-0.1 R for typical per-trade R dispersion. All rows are still written
+# to summary.parquet/csv in full -- the filter applies only to ranked output.
+MIN_TRADES_FOR_RANKING: int = 100
 
 # ── Data / Paths ───────────────────────────────────────────────────────────
 DATASET   = "GLBX.MDP3"

@@ -96,6 +96,11 @@ def build_row(
         "atr_4h":                 sd.atr_4h,
         "tp_to_atr_ratio":        tr.tp_to_atr_ratio,
         "atr_exceeds_cap":        tr.atr_exceeds_cap,
+        # TP distance and fillability. tp_unfillable=True means the target sits
+        # inside one tick of entry (inside the spread) and cannot realistically
+        # fill, though the exit walk still records it as a win. Filter on this.
+        "tp_ticks":               tr.tp_ticks,
+        "tp_unfillable":          tr.tp_unfillable,
         # ── exit ─────────────────────────────────────────────────────────
         "exit_time_utc":          _bar_idx_to_utc(sd, tr.exit_bar_idx),
         "exit_price":             tr.exit_price,
