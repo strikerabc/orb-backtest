@@ -58,7 +58,11 @@ INSTRUMENTS: dict[str, dict] = {
     "GC": {
         "tick_size":         0.10,
         "tick_value_usd":    10.00,            # 100 troy oz × $0.10
-        "continuous_symbol": "GC.c.0",
+        # .v.0 (volume roll), NOT .c.0. Measured across all 12 months of 2024,
+        # GC.c.0 delivered 16.3x-152.9x less data than .v.0 (mean 50.6x) --
+        # broken in EVERY month, not just delivery months. Cached .c.0 pull
+        # held 92,201 bars vs ~2.5M for comparable instruments.
+        "continuous_symbol": "GC.v.0",
         "sessions":          ["NY", "LDN", "TOK"],   # London gold fix proximity + Asian demand
         "has_local_data":    False,
         "data_start":        "2019-01-01",
@@ -80,7 +84,12 @@ INSTRUMENTS: dict[str, dict] = {
     "ZN": {
         "tick_size":         0.015625,         # 1/64 of a point
         "tick_value_usd":    15.625,           # $1,000 × 1/64
-        "continuous_symbol": "ZN.c.0",
+        # .v.0 (volume roll), NOT .c.0. ZN is the textbook delivery-month case:
+        # 1.0x in all eight non-delivery months, 2.2x-2.8x in Mar/Jun/Sep/Dec.
+        # Treasuries roll before delivery opens, so .c.0 tracks a contract in
+        # delivery that barely trades. The deficit is PERIODIC, which biases
+        # results by calendar quarter rather than adding uniform noise.
+        "continuous_symbol": "ZN.v.0",
         "sessions":          ["NY", "LDN"],    # negligible volatility at Tokyo open
         "has_local_data":    False,
         "data_start":        "2019-01-01",
@@ -122,7 +131,15 @@ INSTRUMENTS: dict[str, dict] = {
     "6E": {
         "tick_size":         0.00005,
         "tick_value_usd":    6.25,             # 125,000 EUR × $0.00005
-        "continuous_symbol": "6E.c.0",
+        # .v.0 (volume roll), NOT .c.0. CME FX lists thin SERIAL months beside
+        # the liquid quarterlies, so .c.0 parks on a dead serial for the whole
+        # month after each quarterly expiry:
+        #   Jan 11.9x  Apr 10.3x  Jul 20.0x  Oct 12.2x   (post-expiry, worst)
+        #   Feb  2.1x  May  1.6x  Aug  2.3x  Nov  2.1x   (mid-cycle)
+        #   Mar  1.6x  Jun  1.8x  Sep  1.9x  Dec  1.8x   (quarterly, best)
+        # Degraded 8 of 12 months, mean 5.80x. Note the phase: the quarterly
+        # months are the BEST here, the opposite of ZN.
+        "continuous_symbol": "6E.v.0",
         "sessions":          ["LDN", "NY"],
         "has_local_data":    False,
         "data_start":        "2019-01-01",
@@ -132,7 +149,12 @@ INSTRUMENTS: dict[str, dict] = {
     "6J": {
         "tick_size":         0.0000005,
         "tick_value_usd":    6.25,             # 12,500,000 JPY × $0.0000005
-        "continuous_symbol": "6J.c.0",
+        # .v.0 (volume roll), NOT .c.0. Same serial-month defect as 6E:
+        #   Jan 13.9x  Apr 12.2x  Jul 12.9x  Oct 18.9x   (post-expiry, worst)
+        #   Feb  2.2x  May  1.6x  Aug  2.3x  Nov  2.2x   (mid-cycle)
+        #   Mar  1.6x  Jun  1.8x  Sep  1.8x  Dec  2.0x   (quarterly, best)
+        # Degraded 8 of 12 months, mean 6.11x.
+        "continuous_symbol": "6J.v.0",
         "sessions":          ["TOK", "LDN", "NY"],
         "has_local_data":    False,
         "data_start":        "2019-01-01",

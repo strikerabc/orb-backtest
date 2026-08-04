@@ -49,9 +49,42 @@ _DATA.mkdir(exist_ok=True)
 
 # ── helpers ────────────────────────────────────────────────────────────────
 
+def _roll_tag(sym: str) -> str:
+    """
+    Roll type from the instrument's continuous symbol: 'c', 'v' or 'n'.
+    e.g. "GC.v.0" -> "v".  Defaults to 'c' if the symbol is malformed.
+    """
+    parts = INSTRUMENTS[sym]["continuous_symbol"].split(".")
+    return parts[1] if len(parts) >= 2 and parts[1] in ("c", "v", "n") else "c"
+
+
 def _cache_path(sym: str, schema: str) -> Path:
+    """
+    Cache path, keyed by ROLL TYPE as well as symbol.
+
+    Why the roll must be in the filename: the original scheme was
+    "{sym}_{tag}.parquet", so changing continuous_symbol from GC.c.0 to
+    GC.v.0 left ensure_data() finding the old file and silently returning the
+    broken .c.0 data. The config change would appear to work and do nothing.
+
+    Legacy fallback: files written before this change came from .c.0 pulls, so
+    they remain valid for instruments still on .c.0 and are reused as-is (no
+    re-download for ES/NQ/RTY/CL/BTC/ETH). Instruments switched to .v.0/.n.0
+    resolve to a new path, which triggers a fresh download and leaves the old
+    file untouched on disk.
+    """
     tag = "1m" if schema == SCHEMA_1M else "1d"
-    return _DATA / f"{sym}_{tag}.parquet"
+    roll = _roll_tag(sym)
+
+    versioned = _DATA / f"{sym}_{roll}_{tag}.parquet"
+    if versioned.exists():
+        return versioned
+
+    legacy = _DATA / f"{sym}_{tag}.parquet"
+    if legacy.exists() and roll == "c":
+        return legacy
+
+    return versioned
 
 
 def _load_existing_1m(sym: str) -> pd.DataFrame:

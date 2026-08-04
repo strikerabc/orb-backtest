@@ -145,23 +145,66 @@ def main() -> None:
         print(f"  {sym:<5} {cells}  {mean_s:>7} {max_s:>6}")
 
     hr("INTERPRETATION")
+    print("Verdict order matters. Absolute severity is checked BEFORE")
+    print("periodicity, and the worst months are found EMPIRICALLY rather than")
+    print("assumed to be delivery months.")
+    print()
+    print("Both corrections come from this script's first run mislabelling:")
+    print("  GC     -> called PERIODIC because spike 2.19x cleared a 1.4")
+    print("            threshold, when in fact min ratio was 16.3x: broken in")
+    print("            EVERY month. Severity must be tested first.")
+    print("  6E/6J  -> called UNIFORM because spike came out at 0.22x (below")
+    print("            threshold) since their delivery months are the BEST.")
+    print("            They are periodic with inverted phase, so periodicity")
+    print("            must be tested in both directions.")
+    print()
+
+    MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
     for sym, ratios in results.items():
         vals = [r for r in ratios if r is not None]
         if not vals:
             print(f"  {sym:<5} no data")
             continue
-        gold = sym == "GC"
-        d_idx = GOLD_ACTIVE_MONTHS if gold else QUARTERLY_MONTHS
-        d_vals = [r for i, r in enumerate(ratios, 1) if r is not None and i in d_idx]
-        n_vals = [r for i, r in enumerate(ratios, 1) if r is not None and i not in d_idx]
-        dm = np.mean(d_vals) if d_vals else float("nan")
-        nm = np.mean(n_vals) if n_vals else float("nan")
-        spike = (dm / nm) if (n_vals and nm > 0) else float("nan")
-        verdict = ("PERIODIC (delivery-month artefact)"
-                   if spike == spike and spike > 1.4 else
-                   "UNIFORM deficit" if np.mean(vals) > 1.3 else "fine")
-        print(f"  {sym:<5} delivery-month mean {dm:>5.2f} | "
-              f"other-month mean {nm:>5.2f} | spike {spike:>5.2f}x  {verdict}")
+
+        lo, hi, mean = float(np.min(vals)), float(np.max(vals)), float(np.mean(vals))
+        n_bad = sum(1 for r in vals if r >= 1.4)
+        # empirical worst months, not assumed
+        ranked = sorted(((r, i) for i, r in enumerate(ratios, 1) if r is not None),
+                        reverse=True)
+        worst = ", ".join(MONTH_NAMES[i - 1] for _, i in ranked[:4])
+
+        # 1. absolute severity first -- a high floor means always broken
+        if lo >= 3.0:
+            verdict = f"BROKEN IN EVERY MONTH (min {lo:.1f}x)"
+        # 2. periodicity in EITHER direction
+        elif hi / max(lo, 1e-9) >= 1.8 and hi >= 1.4:
+            verdict = f"PERIODIC ({n_bad}/{len(vals)} months bad, worst: {worst})"
+        # 3. uniform elevation
+        elif mean > 1.3:
+            verdict = f"UNIFORM deficit ({mean:.2f}x)"
+        else:
+            verdict = "fine"
+
+        print(f"  {sym:<5} min {lo:>6.1f}x | mean {mean:>6.2f}x | max {hi:>6.1f}x | "
+              f"bad months {n_bad:>2}/{len(vals):<2}  {verdict}")
+
+    hr("ACTION")
+    need = []
+    for sym, ratios in results.items():
+        vals = [r for r in ratios if r is not None]
+        if vals and (float(np.mean(vals)) > 1.3 or float(np.max(vals)) >= 1.8):
+            need.append((sym, float(np.mean(vals)), float(np.max(vals))))
+    if need:
+        print("  Switch continuous_symbol to .v.0 and re-download:")
+        for sym, mean, hi in sorted(need, key=lambda t: -t[1]):
+            print(f"    {sym:<5} mean {mean:>6.2f}x  max {hi:>6.1f}x")
+        print("\n  Cache paths are keyed by roll type, so changing the symbol in")
+        print("  config.py routes to a new file and triggers a fresh download.")
+        print("  Old .c.0 files are left on disk untouched.")
+    else:
+        print("  No instrument requires re-download.")
 
     if errors:
         hr(f"ERRORS AFTER {MAX_RETRIES} RETRIES ({len(errors)})")
