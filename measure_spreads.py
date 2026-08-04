@@ -134,7 +134,20 @@ def _symbol_for(sym: str) -> str:
 
 
 def _cache_file(sym: str, month: str) -> Path:
+    """Normalised [timestamp, bid, ask] cache."""
     return _SPREADS / f"{sym}_{_roll_tag(sym)}_{month}_bbo1m.parquet"
+
+
+def _raw_cache_file(sym: str, month: str) -> Path:
+    """
+    RAW API response cache, written before any parsing.
+
+    Column names below are inferred, not verified against the bbo-1m schema.
+    If they are wrong, normalisation fails -- and without a raw cache the
+    download would be re-paid on every retry. Persisting the raw response
+    first makes parsing failures free to fix and re-run.
+    """
+    return _SPREADS / f"{sym}_{_roll_tag(sym)}_{month}_bbo1m_RAW.parquet"
 
 
 def _retry(fn, *a, **kw):
@@ -162,15 +175,63 @@ def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str | None:
     return None
 
 
+def _normalise(df: pd.DataFrame, sym: str, month: str) -> pd.DataFrame | None:
+    """
+    Map a raw bbo-1m frame to [timestamp, bid, ask].
+
+    Separated from the download so a wrong column guess costs nothing to fix:
+    the raw response is already cached and normalisation can be re-run offline.
+    """
+    if df is None or len(df) == 0:
+        log.warning("  %-5s %s  empty response", sym, month)
+        return None
+
+    if not isinstance(df.index, pd.RangeIndex):
+        df = df.reset_index()
+
+    ts_col = "ts_event" if "ts_event" in df.columns else df.columns[0]
+    bid_col = _pick_col(df, _BID_CANDIDATES)
+    ask_col = _pick_col(df, _ASK_CANDIDATES)
+    if bid_col is None or ask_col is None:
+        log.error("  %-5s %s  no bid/ask columns found.", sym, month)
+        log.error("      columns present: %s", list(df.columns)[:20])
+        log.error("      raw response IS cached -- fix _BID_CANDIDATES/"
+                  "_ASK_CANDIDATES and re-run, no re-download needed.")
+        return None
+
+    out = pd.DataFrame({
+        "timestamp": pd.to_datetime(df[ts_col], utc=True),
+        "bid": pd.to_numeric(df[bid_col], errors="coerce"),
+        "ask": pd.to_numeric(df[ask_col], errors="coerce"),
+    }).dropna()
+    return out if len(out) else None
+
+
 def download_month(client, sym: str, month: str) -> pd.DataFrame | None:
     """
-    Fetch one month of bbo-1m for sym, cache as parquet, return
-    DataFrame[timestamp, bid, ask]. Reuses cache when present.
+    Fetch one month of bbo-1m for sym and return DataFrame[timestamp, bid, ask].
+
+    Cache order, cheapest first:
+      1. normalised cache  -> no download, no parsing
+      2. raw cache         -> no download, re-parse only
+      3. download          -> persist RAW immediately, then parse
+
+    The raw response is written to disk BEFORE parsing is attempted. Column
+    names here are inferred rather than verified, so a bad guess would
+    otherwise re-charge the download on every retry.
     """
     cache = _cache_file(sym, month)
     if cache.exists():
-        log.info("  %-5s %s  cached", sym, month)
+        log.info("  %-5s %s  cached (normalised)", sym, month)
         return pd.read_parquet(cache)
+
+    raw_cache = _raw_cache_file(sym, month)
+    if raw_cache.exists():
+        log.info("  %-5s %s  cached (raw) -- re-parsing, no spend", sym, month)
+        out = _normalise(pd.read_parquet(raw_cache), sym, month)
+        if out is not None:
+            out.to_parquet(cache, index=False)
+        return out
 
     start, end = _month_bounds(month)
     symbol = _symbol_for(sym)
@@ -184,25 +245,26 @@ def download_month(client, sym: str, month: str) -> pd.DataFrame | None:
         log.warning("  %-5s %s  FAILED: %s", sym, month, err)
         return None
 
-    df = data.to_df()
-    if df is None or len(df) == 0:
-        log.warning("  %-5s %s  empty response", sym, month)
+    try:
+        raw = data.to_df()
+    except Exception as exc:
+        log.error("  %-5s %s  to_df() failed: %s", sym, month, exc)
         return None
 
-    df = df.reset_index()
-    ts_col = "ts_event" if "ts_event" in df.columns else df.columns[0]
-    bid_col = _pick_col(df, _BID_CANDIDATES)
-    ask_col = _pick_col(df, _ASK_CANDIDATES)
-    if bid_col is None or ask_col is None:
-        log.error("  %-5s %s  no bid/ask columns. saw: %s",
-                  sym, month, list(df.columns)[:14])
-        return None
+    # Persist the paid response before anything can go wrong downstream.
+    try:
+        to_save = raw if isinstance(raw.index, pd.RangeIndex) else raw.reset_index()
+        to_save.to_parquet(raw_cache, index=False)
+        log.info("  %-5s %s  raw cached (%d rows) -> %s",
+                 sym, month, len(to_save), raw_cache.name)
+    except Exception as exc:
+        # Keep going: the data is still in memory for this run.
+        log.warning("  %-5s %s  could not cache raw (%s); parsing in-memory",
+                    sym, month, str(exc)[:60])
 
-    out = pd.DataFrame({
-        "timestamp": pd.to_datetime(df[ts_col], utc=True),
-        "bid": pd.to_numeric(df[bid_col], errors="coerce"),
-        "ask": pd.to_numeric(df[ask_col], errors="coerce"),
-    }).dropna()
+    out = _normalise(raw, sym, month)
+    if out is None:
+        return None
 
     out.to_parquet(cache, index=False)
     log.info("  %-5s %s  %d quotes -> %s", sym, month, len(out), cache.name)
