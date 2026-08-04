@@ -9,11 +9,15 @@ Metrics reported:
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 from typing import Any
 
 from src.config import BOOTSTRAP_BLOCK_SIZE_DAYS, BOOTSTRAP_N
+
+log = logging.getLogger("orb.stats")
 
 
 VARIANT_KEYS = [
@@ -94,30 +98,78 @@ def _compute_metrics(r_gross: np.ndarray, r_net: np.ndarray) -> dict[str, Any]:
     }
 
 
+def _drop_unfillable(df: pd.DataFrame, label: str = "") -> pd.DataFrame:
+    """
+    Remove trades whose take-profit sits inside MIN_TP_TICKS of entry.
+
+    Such a TP cannot fill -- it is inside the spread -- yet the exit walk
+    records it as a win, so leaving it in inflates gross expectancy and win
+    rate. trade_sim flags these as tp_unfillable; this is where the flag is
+    actually applied.
+
+    It was previously flagged and never filtered, which inflated every low-rr
+    variant. Measured effect at rr=0.25: 75-83% of ZN trades were unfillable,
+    and excluding them cut gross expectancy from 0.2321 to 0.0855 (-63%).
+    rr >= 1.0 variants were unaffected (0.0% unfillable), so the distortion was
+    concentrated entirely in tight-target variants.
+    """
+    if "tp_unfillable" not in df.columns:
+        return df
+    mask = df["tp_unfillable"].fillna(False).astype(bool)
+    n = int(mask.sum())
+    if n:
+        log.info("%sexcluded %d unfillable-TP trades (%.2f%% of %d)",
+                 f"{label}: " if label else "", n, 100.0 * n / len(df), len(df))
+    return df.loc[~mask]
+
+
 def compute_summary(df: pd.DataFrame) -> pd.DataFrame:
     """
     Given the full trade log DataFrame, compute per-variant metrics
     (aggregated across all regime windows) plus a per-window breakdown.
+
+    Excludes INVALID exits and unfillable take-profits. n_unfillable_excluded
+    records how many were dropped per variant so the exclusion stays visible.
     """
     # Filter out INVALID rows
     valid = df[df["exit_reason"].notna() & (df["exit_reason"] != "INVALID")].copy()
+
+    # Count per-variant exclusions before dropping, so they can be reported.
+    if "tp_unfillable" in valid.columns:
+        excl = (valid.assign(_u=valid["tp_unfillable"].fillna(False).astype(bool))
+                     .groupby(VARIANT_KEYS, observed=True)["_u"].sum())
+    else:
+        excl = None
+
+    valid = _drop_unfillable(valid, "compute_summary")
     rows  = []
 
     for keys, grp in valid.groupby(VARIANT_KEYS, observed=True, sort=True):
         r_g = grp["gross_r"].to_numpy(copy=True)
         r_n = grp["net_r"].to_numpy(copy=True)
         m   = _compute_metrics(r_g, r_n)
-        m.update(dict(zip(VARIANT_KEYS, keys if isinstance(keys, tuple) else [keys])))
+        kt  = keys if isinstance(keys, tuple) else (keys,)
+        m.update(dict(zip(VARIANT_KEYS, kt)))
         m["avg_mae_r"] = round(float(grp["mae_r"].mean()), 4)
         m["avg_mfe_r"] = round(float(grp["mfe_r"].mean()), 4)
+        # How many trades this variant lost to the unfillable-TP rule. Kept
+        # visible so a variant whose sample was gutted cannot look clean.
+        m["n_unfillable_excluded"] = (
+            int(excl.get(kt, 0)) if excl is not None else 0)
         rows.append(m)
 
     return pd.DataFrame(rows)
 
 
 def compute_regime_summary(df: pd.DataFrame) -> pd.DataFrame:
-    """Same as compute_summary but broken out per regime window."""
+    """
+    Same as compute_summary but broken out per regime window.
+
+    Applies the same unfillable-TP exclusion, otherwise per-window expectancy
+    would disagree with the aggregate for no visible reason.
+    """
     valid = df[df["exit_reason"].notna() & (df["exit_reason"] != "INVALID")].copy()
+    valid = _drop_unfillable(valid, "compute_regime_summary")
     rows  = []
     for keys, grp in valid.groupby(VARIANT_KEYS + ["regime_window"],
                                     observed=True, sort=True):

@@ -32,7 +32,7 @@ from src.entry_detector import detect_entries
 from src.trade_sim import simulate_trade
 from src.journal import build_row
 from src.regime_sampler import select_windows, filter_to_window
-from src.null_calibrator import enrich_summary_with_null
+from src.null_calibrator import build_r_ticks_map, enrich_summary_with_null
 from src.stats import compute_summary, compute_regime_summary
 from src.report import write_report
 
@@ -157,8 +157,15 @@ def run() -> None:
     regime_summary = compute_regime_summary(trade_log)
 
     # ── 6. Null calibration ───────────────────────────────────────────────
-    log.info("Running null calibration (bootstrap + random-entry benchmark)...")
-    summary = enrich_summary_with_null(summary, session_days_map)
+    # The matched-stop null needs the observed r_ticks distribution per variant
+    # family: random entry timing is compared at the SAME stop distance, so the
+    # test isolates timing rather than stop width. Without this the comparator
+    # draws much tighter stops, inflates same-bar SL/TP collisions 140x, and
+    # becomes anti-conservative.
+    log.info("Building observed r_ticks map for matched null...")
+    r_map = build_r_ticks_map(trade_log)
+    log.info("Running null calibration (matched-stop random-entry benchmark)...")
+    summary = enrich_summary_with_null(summary, session_days_map, r_map)
 
     # ── 7. Write outputs ──────────────────────────────────────────────────
     write_report(summary, regime_summary, trade_log, _OUT)

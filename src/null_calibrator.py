@@ -48,7 +48,7 @@ import pandas as pd
 
 from src.config import (
     BOOTSTRAP_BLOCK_SIZE_DAYS, N_NULL_DRAWS_PER_DAY, NULL_BOOTSTRAP_N,
-    NULL_SAMPLE_DAYS, SESSIONS,
+    NULL_SAMPLE_DAYS, RR_LEVELS, SESSIONS,
 )
 from src.entry_detector import EntrySignal
 from src.range_builder import SessionDay
@@ -117,6 +117,115 @@ def _random_entry_signal(sd: SessionDay, rm: int, direction: str,
         sl_price=sl, sl_bars_back=slb, sl_source=sls,
         gap_fill=False,
     )
+
+
+def _matched_entry_signal(sd: SessionDay, rm: int, direction: str,
+                          r_ticks_pool: np.ndarray,
+                          rng: np.random.Generator) -> EntrySignal | None:
+    """
+    Random entry TIMING with the OBSERVED variant's stop distance.
+
+    Why this replaced the swing-derived null
+    ----------------------------------------
+    _random_entry_signal derives its stop from the same swing machinery, but
+    from a mid-session bar the nearest down-close cluster is much closer than
+    it is at a range boundary. Measured on real variants:
+
+        ES/NY/15m/CC/short    observed r=34 ticks   swing-null r=4 ticks
+        NQ/NY/15m/CC/short    observed r=173        swing-null r=12
+        median ratio 0.27x -- null stops are 3-4x TIGHTER
+
+    A 4-tick stop on ES sits inside a typical 1-minute bar, so SL and TP land
+    in the SAME bar constantly, and trade_sim resolves those as SL by design.
+    Same-bar ambiguity ran 140x higher in the null than in the observed set
+    (ES 0.05% -> 13.00%). The null was therefore losing to the conservative
+    tiebreak rule, not to worse timing:
+
+        swing-derived null, median gross : -0.1459
+        matched-stop null, median gross  : +0.0084   <- a fair null sits at ~0
+
+    That made null_p ANTI-conservative and produced null_p < 0.05 for 78% of
+    rankable variants (5,599 of 7,140), which is not credible as real edges.
+
+    Holding r fixed and randomising only the entry bar isolates the question
+    the null was always meant to answer: does breakout TIMING beat arbitrary
+    timing at the same risk geometry?
+
+    r does not depend on rr (r = |entry - sl|, set before rr is applied), so a
+    single pool serves every rr level for a variant.
+    """
+    if rm not in sd.range_highs:
+        return None
+    n = len(sd.bars_o)
+    if n == 0 or r_ticks_pool is None or len(r_ticks_pool) == 0:
+        return None
+
+    sess = SESSIONS[sd.session]
+    open_min = sess["open"][0] * 60 + sess["open"][1]
+    range_end = int(np.searchsorted(sd.bar_wall_mins, open_min + rm))
+    if range_end >= n:
+        return None
+
+    idx = int(rng.integers(range_end, n))
+    fill = float(sd.bars_o[idx])
+    r_t = float(rng.choice(r_ticks_pool))
+    if r_t < 1:
+        return None
+
+    dist = r_t * sd.tick_size
+    is_long = direction == "long"
+    sl = fill - dist if is_long else fill + dist
+    boundary = sd.range_highs[rm] if is_long else sd.range_lows[rm]
+
+    return EntrySignal(
+        mode="NULL-MATCHED", closure_tf=1, range_minutes=rm,
+        direction=direction, entry_bar_idx=idx, fill_price=fill,
+        breakout_bar_idx=idx, tap_in_bar_idx=None, boundary=boundary,
+        sl_price=sl, sl_bars_back=0, sl_source="matched", gap_fill=False,
+    )
+
+
+def build_matched_null_pool(
+    session_days: list[SessionDay],
+    range_minutes: int,
+    direction: str,
+    r_ticks_pool: np.ndarray,
+    rr_levels: list[float],
+    draws_per_day: int = N_NULL_DRAWS_PER_DAY,
+    seed: int = 99,
+) -> dict[float, NullPool]:
+    """
+    Matched-stop null pools for ALL rr levels in one pass.
+
+    simulate_trade evaluates every rr from a single entry, and r is
+    rr-independent, so one traversal serves all six levels. Keeps the pool
+    count near the swing-null design (~1350 vs ~900) instead of 6x higher.
+    """
+    rng = np.random.default_rng(seed)
+    per_day: dict[float, list[np.ndarray]] = {rr: [] for rr in rr_levels}
+    totals: dict[float, int] = {rr: 0 for rr in rr_levels}
+
+    for sd in session_days:
+        vals: dict[float, list[float]] = {rr: [] for rr in rr_levels}
+        for _ in range(max(1, draws_per_day)):
+            es = _matched_entry_signal(sd, range_minutes, direction,
+                                       r_ticks_pool, rng)
+            if es is None:
+                continue
+            for tr in simulate_trade(es, sd, rr_levels=rr_levels):
+                if tr.exit_reason in ("INVALID", None):
+                    continue
+                g = tr.gross_r
+                if g is not None and np.isfinite(g):
+                    vals[tr.rr].append(float(g))
+        for rr, v in vals.items():
+            if v:
+                arr = np.asarray(v, dtype=float)
+                per_day[rr].append(arr)
+                totals[rr] += len(arr)
+
+    return {rr: NullPool(per_day=per_day[rr], n_trades=totals[rr])
+            for rr in rr_levels}
 
 
 def build_null_pool(
@@ -222,25 +331,70 @@ def null_p_value(observed_expectancy: float, null_means: np.ndarray) -> float:
     return float((1 + r_gt + 0.5 * r_eq) / (1 + n))
 
 
+POOL_KEYS = ["instrument", "session", "range_minutes",
+             "entry_mode", "closure_tf", "direction"]
+
+
+def build_r_ticks_map(trade_log: pd.DataFrame) -> dict[tuple, np.ndarray]:
+    """
+    Observed r_ticks distribution per variant family, for the matched null.
+
+    Keyed WITHOUT rr, because r = |entry - sl| is fixed before rr is applied,
+    so all six rr levels of a variant share one stop distribution.
+
+    entry_mode and closure_tf ARE in the key: a tap-in enters at the boundary
+    where the nearest swing cluster is close, while a candle-close entry enters
+    further out. Measured medians differ by two orders of magnitude
+    (ZN TI = 2 ticks, NQ CC = 173 ticks), so collapsing them would defeat the
+    matching.
+    """
+    df = trade_log
+    if "exit_reason" in df.columns:
+        df = df[df["exit_reason"].notna() & (df["exit_reason"] != "INVALID")]
+
+    out: dict[tuple, np.ndarray] = {}
+    for keys, grp in df.groupby(POOL_KEYS, observed=True):
+        r = grp["r_ticks"].to_numpy(dtype=float)
+        r = r[np.isfinite(r) & (r >= 1.0)]
+        if len(r):
+            out[tuple(keys)] = r
+    log.info("r_ticks map: %d variant families", len(out))
+    return out
+
+
 def enrich_summary_with_null(
     summary_df: pd.DataFrame,
     session_days_map: dict,          # (sym, session) -> list[SessionDay]
+    r_ticks_map: dict | None = None,  # from build_r_ticks_map(trade_log)
     n_null_samples: int = NULL_SAMPLE_DAYS,
     n_boot: int = NULL_BOOTSTRAP_N,
+    rr_levels: list[float] | None = None,
 ) -> pd.DataFrame:
     """
-    Add null_exp_mean, null_exp_p95, null_p_value columns.
+    Add null_exp_mean, null_exp_p95, null_p_value, null_design columns.
 
-    Null pools are cached on (sym, session, range_minutes, direction, rr):
-    the pool does not depend on entry_mode or closure_tf, so thousands of
-    summary rows collapse onto a few hundred distinct pools.
+    Uses the MATCHED-STOP null when r_ticks_map is supplied: random entry
+    timing at the observed variant's own stop distance, so only timing differs.
+    See _matched_entry_signal for why the swing-derived null was abandoned
+    (140x same-bar-ambiguity inflation made it anti-conservative and produced
+    null_p < 0.05 for 78% of variants).
+
+    Falls back to the swing-derived null per row when a variant family has no
+    observed r_ticks, and records which comparator was used in null_design so
+    the distinction survives into the artefact.
+
+    Pools are cached on (instrument, session, range_minutes, entry_mode,
+    closure_tf, direction) with all rr levels built in one traversal.
     """
     if summary_df.empty:
         return summary_df
 
-    cache: dict[tuple, NullPool] = {}
+    rr_levels = rr_levels or list(RR_LEVELS)
+    matched_cache: dict[tuple, dict[float, NullPool]] = {}
+    swing_cache: dict[tuple, NullPool] = {}
     out_rows: list[dict] = []
     n_rows = len(summary_df)
+    n_matched = n_swing = 0
 
     for i, (_, row) in enumerate(summary_df.iterrows()):
         sym = row["instrument"]
@@ -248,13 +402,30 @@ def enrich_summary_with_null(
         rm = int(row["range_minutes"])
         rr = float(row["rr"])
         direction = row["direction"]
+        pool_key = (sym, sess, rm, row["entry_mode"],
+                    int(row["closure_tf"]), direction)
 
-        key = (sym, sess, rm, direction, rr)
-        pool = cache.get(key)
-        if pool is None:
-            sds = session_days_map.get((sym, sess), [])
-            pool = build_null_pool(sds[:n_null_samples], rm, direction, rr)
-            cache[key] = pool
+        r_pool = (r_ticks_map or {}).get(pool_key)
+        sds = session_days_map.get((sym, sess), [])[:n_null_samples]
+
+        if r_pool is not None and len(r_pool):
+            design = "matched"
+            pools = matched_cache.get(pool_key)
+            if pools is None:
+                pools = build_matched_null_pool(
+                    sds, rm, direction, r_pool, rr_levels)
+                matched_cache[pool_key] = pools
+            pool = pools.get(rr, NullPool(per_day=[], n_trades=0))
+            n_matched += 1
+        else:
+            # No observed stops for this family -- fall back, and say so.
+            design = "swing-fallback"
+            skey = (sym, sess, rm, direction, rr)
+            pool = swing_cache.get(skey)
+            if pool is None:
+                pool = build_null_pool(sds, rm, direction, rr)
+                swing_cache[skey] = pool
+            n_swing += 1
 
         n_obs = int(row.get("trade_count", 0) or 0)
         obs = float(row.get("expectancy_gross_r", 0.0) or 0.0)
@@ -271,13 +442,16 @@ def enrich_summary_with_null(
             d["null_exp_mean"] = np.nan
             d["null_exp_p95"] = np.nan
         d["null_pool_trades"] = pool.n_trades
+        d["null_design"] = design
         d["null_p_value"] = round(null_p_value(obs, means), 4)
         out_rows.append(d)
 
         if (i + 1) % 1000 == 0:
-            log.info("null calibration %d/%d rows (%d pools cached)",
-                     i + 1, n_rows, len(cache))
+            log.info("null calibration %d/%d rows "
+                     "(%d matched pools, %d swing pools)",
+                     i + 1, n_rows, len(matched_cache), len(swing_cache))
 
-    log.info("null calibration complete: %d rows, %d distinct pools",
-             n_rows, len(cache))
+    log.info("null calibration complete: %d rows | matched %d, swing-fallback %d "
+             "| %d matched pools, %d swing pools",
+             n_rows, n_matched, n_swing, len(matched_cache), len(swing_cache))
     return pd.DataFrame(out_rows)
