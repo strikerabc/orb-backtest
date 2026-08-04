@@ -238,6 +238,31 @@ SLIPPAGE_TICKS_BY_SYMBOL: dict[str, float] = {
     "ETH": 10.0,   # tick $0.05; spread commonly $0.50+ -> ~10 ticks
 }
 
+# Per-(symbol, session) slippage override, in TICKS. Takes precedence over
+# SLIPPAGE_TICKS_BY_SYMBOL when an entry exists.
+#
+# Why session matters and a single per-symbol scalar is not enough:
+# spreads differ materially BY SESSION, and session is one of the dimensions
+# variants are ranked on. ES at the NY open is a ~1-tick market; ES at the
+# Tokyo open is genuinely wider. 6J is tighter at Tokyo than at NY. Charging
+# one scalar across all three overcharges the liquid session and undercharges
+# the thin one, biasing precisely the cross-session comparison this
+# multi-asset sweep exists to make.
+#
+# A pooled median across sessions is also weighted by WINDOW LENGTH rather
+# than by trades taken (LDN's 4h window contributes more quotes than NY's
+# 2.5h), which is an arbitrary weighting with no economic meaning.
+#
+# Populate from measure_spreads.py, which reports per-session medians.
+# Empty means "fall back to the per-symbol value".
+SLIPPAGE_TICKS_BY_SYMBOL_SESSION: dict[tuple[str, str], float] = {}
+
+# Provenance of the slippage numbers currently in use. Flip to "measured"
+# per symbol as real spreads land, so the report can state which instruments
+# rest on assumptions rather than measurements.
+SLIPPAGE_PROVENANCE: dict[str, str] = {s: "estimated" for s in
+                                       SLIPPAGE_TICKS_BY_SYMBOL}
+
 # Minimum fillable take-profit distance, in ticks.
 #
 # A TP closer than one tick to entry sits inside the spread and cannot fill,

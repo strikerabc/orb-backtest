@@ -233,8 +233,9 @@ def measure(sym: str, frames: list[pd.DataFrame]) -> dict | None:
         return None
 
     sessions = INSTRUMENTS[sym].get("sessions", list(SESSIONS.keys()))
-    per_session: dict[str, float] = {}
+    per_session: dict[str, dict] = {}
     in_any = np.zeros(len(df), dtype=bool)
+    sp = df["spread_ticks"].to_numpy()
 
     for sess_name in sessions:
         sess = SESSIONS[sess_name]
@@ -245,22 +246,37 @@ def measure(sym: str, frames: list[pd.DataFrame]) -> dict | None:
         m = ((wall >= o) & (wall < x)).to_numpy()
         in_any |= m
         if m.sum() > 0:
-            per_session[sess_name] = float(np.median(df["spread_ticks"].to_numpy()[m]))
+            s = sp[m]
+            per_session[sess_name] = {
+                "median": float(np.median(s)),
+                "p75": float(np.percentile(s, 75)),
+                "p95": float(np.percentile(s, 95)),
+                "quotes": int(m.sum()),
+            }
 
-    traded = df["spread_ticks"].to_numpy()[in_any]
-    if len(traded) == 0:
+    if not per_session:
         return None
+
+    traded = sp[in_any]
+    meds = [v["median"] for v in per_session.values()]
 
     return {
         "sym": sym,
         "quotes_total": len(df),
         "quotes_in_session": int(in_any.sum()),
         "bad_quotes": n_bad,
-        "median_all_hours": float(np.median(df["spread_ticks"])),
-        "median_traded": float(np.median(traded)),
-        "p75_traded": float(np.percentile(traded, 75)),
-        "p95_traded": float(np.percentile(traded, 95)),
+        # PER-SESSION IS THE PRIMARY RESULT -- see note below.
         "per_session": per_session,
+        "median_worst_session": float(max(meds)),
+        "median_best_session": float(min(meds)),
+        # Diagnostic only. NOT for config use: pooling across sessions weights
+        # by WINDOW LENGTH rather than by trades taken (LDN's 4h window
+        # contributes more quotes than NY's 2.5h), so this scalar has no
+        # economic meaning for a multi-session instrument. Retained purely to
+        # show how far a single pooled number drifts from the per-session
+        # truth.
+        "pooled_median_DIAGNOSTIC": float(np.median(traded)),
+        "median_all_hours_DIAGNOSTIC": float(np.median(sp)),
         "estimated": SLIPPAGE_TICKS_BY_SYMBOL.get(sym),
     }
 
@@ -345,24 +361,29 @@ def main() -> None:
             if df is not None and len(df):
                 per_sym.setdefault(sym, []).append(df)
 
-    hr("MEASURED SPREADS (ticks, round trip = one full spread)")
-    print(f"  {'sym':<5} {'est':>5} {'measured':>9} {'p75':>6} {'p95':>6} "
-          f"{'ratio':>7} {'quotes':>10}  per-session median")
-    print("  " + "-" * 92)
+    hr("MEASURED SPREADS PER SESSION (ticks; round trip = one full spread)")
+    print("Per-session is the primary result. A single pooled scalar is shown")
+    print("only to expose how far it drifts -- it is weighted by window length,")
+    print("not by trades taken, so it has no economic meaning.\n")
+    print(f"  {'sym':<5} {'sess':<5} {'est':>5} {'median':>7} {'p75':>6} "
+          f"{'p95':>6} {'vs est':>8} {'quotes':>9}")
+    print("  " + "-" * 60)
 
     results: list[dict] = []
     for sym in INSTRUMENTS:
         r = measure(sym, per_sym.get(sym, []))
         if r is None:
-            print(f"  {sym:<5} {'--':>5} {'NO DATA':>9}")
+            print(f"  {sym:<5} {'--':<5} {'NO DATA':>21}")
             continue
         results.append(r)
         est = r["estimated"]
-        ratio = (r["median_traded"] / est) if est else float("nan")
-        sess_s = "  ".join(f"{k}={v:.2f}" for k, v in r["per_session"].items())
-        print(f"  {sym:<5} {est:>5.1f} {r['median_traded']:>9.2f} "
-              f"{r['p75_traded']:>6.2f} {r['p95_traded']:>6.2f} "
-              f"{ratio:>6.2f}x {r['quotes_in_session']:>10,}  {sess_s}")
+        for sess_name, s in r["per_session"].items():
+            ratio = (s["median"] / est) if est else float("nan")
+            print(f"  {sym:<5} {sess_name:<5} {est:>5.1f} {s['median']:>7.2f} "
+                  f"{s['p75']:>6.2f} {s['p95']:>6.2f} {ratio:>7.2f}x "
+                  f"{s['quotes']:>9,}")
+        print(f"  {'':<5} {'(pooled diagnostic':<5} "
+              f"{r['pooled_median_DIAGNOSTIC']:>18.2f}  <- do not use)")
 
     if not results:
         print("\n  No measurements produced.")
@@ -370,39 +391,76 @@ def main() -> None:
 
     # ── config block ───────────────────────────────────────────────────────
     hr("CONFIG BLOCK — paste into config.py")
+    print("# Measured via " + SCHEMA_BBO + ", months " + ", ".join(SAMPLE_MONTHS))
+    print("SLIPPAGE_TICKS_BY_SYMBOL_SESSION: dict[tuple[str, str], float] = {")
+    for r in sorted(results, key=lambda d: d["sym"]):
+        for sess_name, s in r["per_session"].items():
+            # floor of one tick: you cannot cross less than the minimum increment
+            v = max(1.0, round(s["median"], 2))
+            print(f'    ("{r["sym"]}", "{sess_name}"): {v:>6.2f},   '
+                  f'# was {r["estimated"]:.1f} (flat)')
+    print("}")
+    print()
+    print("# Fallback when a (symbol, session) pair is absent. Worst session")
+    print("# per symbol -- conservative rather than optimistic.")
     print("SLIPPAGE_TICKS_BY_SYMBOL: dict[str, float] = {")
     for r in sorted(results, key=lambda d: d["sym"]):
-        v = r["median_traded"]
-        # round to 2dp; keep a floor of one tick since you cannot cross less
-        v = max(1.0, round(v, 2))
-        print(f'    "{r["sym"]}": {v:>6.2f},   '
-              f'# measured {SCHEMA_BBO}, was {r["estimated"]:.1f}')
+        v = max(1.0, round(r["median_worst_session"], 2))
+        print(f'    "{r["sym"]}": {v:>6.2f},   # worst session')
+    print("}")
+    print()
+    print("SLIPPAGE_PROVENANCE: dict[str, str] = {")
+    for r in sorted(results, key=lambda d: d["sym"]):
+        print(f'    "{r["sym"]}": "measured",')
     print("}")
 
     # ── impact flags ───────────────────────────────────────────────────────
     hr("WHERE THE ESTIMATE WAS WRONG")
-    for r in sorted(results, key=lambda d: -abs(
-            (d["median_traded"] / d["estimated"]) if d["estimated"] else 0)):
+    print("Judged on the WORST session per symbol, since that is the fallback.\n")
+    for r in sorted(results, key=lambda d: -(
+            (d["median_worst_session"] / d["estimated"]) if d["estimated"] else 0)):
         est = r["estimated"]
         if not est:
             continue
-        ratio = r["median_traded"] / est
+        worst = r["median_worst_session"]
+        best = r["median_best_session"]
+        ratio = worst / est
         if ratio >= 1.5:
             verdict = f"UNDERCHARGED {ratio:.2f}x -- costs were too optimistic"
         elif ratio <= 0.67:
             verdict = f"OVERCHARGED {1/ratio:.2f}x -- costs were too harsh"
         else:
             verdict = "estimate close enough"
-        print(f"  {r['sym']:<5} est {est:>5.1f}t  measured {r['median_traded']:>6.2f}t   {verdict}")
+        spread_range = ""
+        if worst > 0 and best > 0 and worst / best >= 1.5:
+            spread_range = (f"  [sessions differ {worst/best:.1f}x: "
+                            f"{best:.2f}-{worst:.2f}t -- a flat scalar would "
+                            f"bias cross-session ranking]")
+        print(f"  {r['sym']:<5} est {est:>5.1f}t  worst {worst:>6.2f}t   "
+              f"{verdict}{spread_range}")
 
     print("\n  Reminder: measured spread is a FLOOR on execution cost. It")
     print("  excludes market impact, and ORB entries fire on breakouts where")
     print("  price is moving through the book. Treat these as lower bounds.")
 
+    # ── save ───────────────────────────────────────────────────────────────
+    flat: list[dict] = []
+    for r in results:
+        for sess_name, s in r["per_session"].items():
+            flat.append({
+                "sym": r["sym"], "session": sess_name,
+                "median_ticks": round(s["median"], 4),
+                "p75_ticks": round(s["p75"], 4),
+                "p95_ticks": round(s["p95"], 4),
+                "quotes": s["quotes"],
+                "estimated_ticks": r["estimated"],
+                "bad_quotes": r["bad_quotes"],
+                "months": " ".join(SAMPLE_MONTHS),
+                "schema": SCHEMA_BBO,
+            })
     out = _SPREADS / "measured_spreads.csv"
-    pd.DataFrame([{k: v for k, v in r.items() if k != "per_session"}
-                  for r in results]).to_csv(out, index=False)
-    print(f"\n  saved -> {out}")
+    pd.DataFrame(flat).to_csv(out, index=False)
+    print(f"\n  saved -> {out}  ({len(flat)} symbol-session rows)")
     print("\n" + "=" * 96 + "\n")
 
 

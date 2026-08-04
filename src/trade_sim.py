@@ -14,7 +14,8 @@ import numpy as np
 
 from src.config import (
     ATR_CAP_MULTIPLE, COMMISSION_PER_SIDE_USD, INSTRUMENTS, MIN_TP_TICKS,
-    RR_LEVELS, SLIPPAGE_TICKS_BY_SYMBOL, SLIPPAGE_TICKS_ROUND_TRIP,
+    RR_LEVELS, SLIPPAGE_TICKS_BY_SYMBOL, SLIPPAGE_TICKS_BY_SYMBOL_SESSION,
+    SLIPPAGE_TICKS_ROUND_TRIP,
 )
 from src.entry_detector import EntrySignal
 from src.range_builder import SessionDay
@@ -44,20 +45,42 @@ class TradeResult:
     tp_unfillable: bool        # True if tp_ticks < MIN_TP_TICKS (inside spread)
 
 
+def slippage_ticks_for(sym: str | None, session: str | None = None) -> float:
+    """
+    Round-trip slippage in ticks, resolved most-specific-first:
+
+        1. SLIPPAGE_TICKS_BY_SYMBOL_SESSION[(sym, session)]
+        2. SLIPPAGE_TICKS_BY_SYMBOL[sym]
+        3. SLIPPAGE_TICKS_ROUND_TRIP (global fallback)
+
+    Session specificity matters because spreads differ materially by session,
+    and session is a dimension variants are ranked on. One scalar per symbol
+    overcharges the liquid session and undercharges the thin one, biasing the
+    cross-session comparison itself.
+    """
+    if sym is None:
+        return float(SLIPPAGE_TICKS_ROUND_TRIP)
+    if session is not None:
+        v = SLIPPAGE_TICKS_BY_SYMBOL_SESSION.get((sym, session))
+        if v is not None:
+            return float(v)
+    return float(SLIPPAGE_TICKS_BY_SYMBOL.get(sym, SLIPPAGE_TICKS_ROUND_TRIP))
+
+
 def _round_cost_r(r_ticks: float, tick_value_usd: float,
-                  sym: str | None = None) -> float:
+                  sym: str | None = None,
+                  session: str | None = None) -> float:
     """
     Total round-trip cost in R units (commission + slippage).
 
-    Slippage is looked up per symbol; one tick is not economically comparable
-    across instruments (ETH's tick is 0.0017% of price, ZN's is far larger
-    relative to typical stop distance). Falls back to the global constant when
-    the symbol has no entry.
+    Slippage is looked up per (symbol, session); one tick is not economically
+    comparable across instruments (ETH's tick is 0.0017% of price, ZN's is far
+    larger relative to typical stop distance), nor across sessions within one
+    instrument.
     """
     if r_ticks <= 0:
         return 0.0
-    slip = SLIPPAGE_TICKS_BY_SYMBOL.get(sym, SLIPPAGE_TICKS_ROUND_TRIP) \
-        if sym is not None else SLIPPAGE_TICKS_ROUND_TRIP
+    slip = slippage_ticks_for(sym, session)
     comm_ticks = 2.0 * COMMISSION_PER_SIDE_USD / tick_value_usd
     total_ticks = comm_ticks + slip
     return total_ticks / r_ticks
@@ -82,7 +105,7 @@ def simulate_trade(
     r_ticks  = r / tick
     sign     = 1.0 if is_long else -1.0
 
-    cost_r   = _round_cost_r(r_ticks, tv_usd, sd.instrument)
+    cost_r   = _round_cost_r(r_ticks, tv_usd, sd.instrument, sd.session)
     atr      = sd.atr_4h
 
     if r <= 0 or r_ticks < 1:
