@@ -9,10 +9,85 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import json
+
 from src.config import (
     MIN_TRADES_FOR_RANKING, SLIPPAGE_PROVENANCE,
     SLIPPAGE_TICKS_BY_SYMBOL_SESSION,
 )
+
+
+def _verdict_banner(output_dir: Path) -> list[str]:
+    """
+    Lead the report with the out-of-sample verdict, if one exists.
+
+    Without this the report opens with a Top-20 ranked by gross expectancy, and
+    a reader would reasonably conclude those variants are good. They are
+    in-sample selection artefacts: the holdout test found the survivor set at or
+    below the multiple-comparisons chance rate and indistinguishable from a coin
+    flip out-of-sample.
+
+    Read from holdout_verdict.json rather than hardcoded so the report always
+    carries the LATEST holdout result instead of a stale claim.
+    """
+    vpath = output_dir / "holdout_verdict.json"
+    if not vpath.exists():
+        return [
+            "> **NO OUT-OF-SAMPLE TEST HAS BEEN RUN.**",
+            "> Every table below is in-sample. With thousands of variants swept,",
+            "> in-sample rank is not evidence of edge. Run `test_holdout.py`.",
+            "",
+        ]
+    try:
+        v = json.loads(vpath.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    is_null = v.get("verdict", "").startswith("NO EDGE")
+    head = "## ⚠️ VERDICT: " + v.get("verdict", "unknown")
+    lines = [head, ""]
+
+    if is_null:
+        lines += [
+            "**The ranked tables below are in-sample and are best read as "
+            "selection artefacts.** Two independent checks say so:",
+            "",
+        ]
+    lines += [
+        f"**1. In-sample survivors are at or below the chance rate.** "
+        f"{v['survivor_families']} of {v['families_rankable']:,} signal families "
+        f"were net-positive and `null_p < 0.05` "
+        f"({v['survivor_pct_of_families']}%), against ~{v['expected_fp_at_5pct']} "
+        f"expected from multiple comparisons alone at a 5% threshold "
+        f"(5.0%). "
+        + ("So the survivor set cannot be distinguished from noise before the "
+           "holdout is even consulted." if v.get("below_chance_rate") else ""),
+        "",
+        f"**2. Out-of-sample ({v['holdout_start']} onward, never used for "
+        f"selection).** Of {v['holdout_families_tested']} families, "
+        f"{v['holdout_net_positive']} stayed net-positive "
+        f"({v['holdout_net_positive_pct']}% — chance is 50%). "
+        f"Trade-weighted mean holdout net R = "
+        f"**{v['holdout_trade_weighted_net_r']:+.4f}**, bootstrap 95% CI "
+        f"[{v['holdout_ci_lo']:+.4f}, {v['holdout_ci_hi']:+.4f}]"
+        + (" — includes zero." if v.get("ci_includes_zero") else "."),
+        "",
+        f"Variant counts overstate findings ~1.9x: all six RR levels of one "
+        f"entry signal share the same entries and differ only in exit "
+        f"placement, so {v['survivor_variants']} \"variants\" are "
+        f"{v['survivor_families']} independent families.",
+        "",
+        f"*Power caveat:* median {v['median_holdout_trades']} holdout trades per "
+        f"family at per-trade sd ~1.0 R gives SE ~"
+        f"{1.0/max(v['median_holdout_trades'],1)**0.5:.2f} R, so individual "
+        f"rows are uninformative — only the pooled figure carries weight. "
+        f"A null result does not prove no edge exists; it establishes that "
+        f"this sweep did not find one.",
+        "",
+        "---",
+        "",
+    ]
+    return lines
 
 log = logging.getLogger("orb.report")
 
@@ -112,9 +187,10 @@ def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
     else:
         rankable, n_excl = summary, 0
 
-    lines = [
-        "# ORB Backtest — Results Summary",
-        f"\n**Total valid trades:** {n_total:,}  |  "
+    lines = ["# ORB Backtest — Results Summary", ""]
+    lines += _verdict_banner(output_dir)
+    lines += [
+        f"**Total valid trades:** {n_total:,}  |  "
         f"**ATR-invalidated (flagged):** {n_atr:,}  |  "
         f"**Same-bar ambiguous:** {n_amb:,}",
         "",

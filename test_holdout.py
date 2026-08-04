@@ -40,6 +40,7 @@ Usage:
 """
 from __future__ import annotations
 
+import json
 import logging
 import sys
 import time
@@ -270,8 +271,38 @@ def main() -> None:
     out = _OUT / "holdout_test.csv"
     comp.to_csv(out, index=False)
     fams.to_csv(_OUT / "survivor_families.csv", index=False)
+
+    # ── machine-readable verdict for report.py ─────────────────────────────
+    # Written as JSON rather than hardcoded into report.py so the report always
+    # reflects the LATEST holdout run instead of carrying stale claims.
+    verdict = {
+        "holdout_start": HOLDOUT_START,
+        "families_rankable": int(n_fam_rank),
+        "expected_fp_at_5pct": int(exp_fp),
+        "survivor_families": int(len(fams)),
+        "survivor_variants": int(len(surv)),
+        "survivor_pct_of_families": round(100.0 * len(fams) / n_fam_rank, 2),
+        "holdout_families_tested": int(len(fam_comp)),
+        "holdout_net_positive": int(held_fam),
+        "holdout_net_positive_pct": round(100.0 * held_fam / len(fam_comp), 1),
+        "holdout_trade_weighted_net_r": round(pooled, 4),
+        "holdout_simple_mean_net_r": round(simple, 4),
+        "holdout_ci_lo": round(lo, 4),
+        "holdout_ci_hi": round(hi, 4),
+        "holdout_trades_pooled": int(w.sum()),
+        "median_holdout_trades": int(fam_comp["ho_trades"].median()),
+        "below_chance_rate": bool(len(fams) <= exp_fp),
+        "ci_includes_zero": bool(ci_includes_zero),
+        "verdict": ("NO EDGE ESTABLISHED"
+                    if (pooled <= 0 or ci_includes_zero)
+                    else "CANDIDATE EDGE -- requires forward testing"),
+    }
+    vpath = _OUT / "holdout_verdict.json"
+    vpath.write_text(json.dumps(verdict, indent=2), encoding="utf-8")
+
     print(f"\n  saved -> {out}")
     print(f"  saved -> {_OUT / 'survivor_families.csv'}")
+    print(f"  saved -> {vpath}")
     print(f"  elapsed {time.perf_counter()-t0:.0f}s")
     print("\n" + "=" * 116 + "\n")
 
