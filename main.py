@@ -23,8 +23,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.config import INSTRUMENTS, SESSIONS, RR_LEVELS, OUTPUTS_DIR
-from src.data_layer import ensure_data, ensure_daily, _compute_enrichment
+from src.config import INSTRUMENTS, SESSIONS, RR_LEVELS, OUTPUTS_DIR, SCHEMA_1M
+from src.data_layer import (
+    ensure_data, ensure_daily, _compute_enrichment, _cache_path, _roll_tag,
+)
 from src.range_builder import build_session_days, SessionDay
 from src.entry_detector import detect_entries
 from src.trade_sim import simulate_trade
@@ -47,9 +49,47 @@ def _get_api_key() -> str | None:
     return os.environ.get("DATABENTO_API_KEY")
 
 
+def _preflight(api_key: str | None) -> None:
+    """
+    Resolve every cache path BEFORE doing any work, and fail fast if a
+    download is required but no API key is present.
+
+    Without this, ensure_data only raises when it REACHES a missing cache.
+    Instrument order is ES, NQ, RTY, GC..., so a missing key would load three
+    instruments and then die several minutes in. This makes the run plan
+    explicit up front and cheap to abort.
+    """
+    reuse, download = [], []
+    for sym in INSTRUMENTS:
+        p = _cache_path(sym, SCHEMA_1M)
+        (reuse if p.exists() else download).append((sym, p.name))
+
+    log.info("── data plan ──────────────────────────────────────────────")
+    for sym, name in reuse:
+        log.info("  reuse     %-5s  %s", sym, name)
+    for sym, name in download:
+        log.info("  DOWNLOAD  %-5s  %s  (roll=%s)", sym, name, _roll_tag(sym))
+
+    if download and not api_key:
+        names = ", ".join(s for s, _ in download)
+        raise SystemExit(
+            f"\nDATABENTO_API_KEY is not set, but {len(download)} symbol(s) need "
+            f"downloading: {names}\n\n"
+            f"  PowerShell:  $env:DATABENTO_API_KEY = \"db-...\"\n\n"
+            f"Run cost_check.py first to see the exact spend before downloading."
+        )
+
+    if download:
+        log.info("%d symbol(s) will download; %d reused from cache.",
+                 len(download), len(reuse))
+    else:
+        log.info("All %d symbols cached — no Databento spend.", len(reuse))
+
+
 def run() -> None:
     t0 = time.perf_counter()
     api_key = _get_api_key()
+    _preflight(api_key)
 
     # ── 1. Load / build data ───────────────────────────────────────────────
     data: dict[str, pd.DataFrame] = {}
