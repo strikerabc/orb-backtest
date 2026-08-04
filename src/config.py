@@ -276,6 +276,16 @@ STYPE     = "continuous"
 DOWNLOAD_START = "2019-01-01"   # new download window
 DOWNLOAD_END   = "2022-12-31"
 
+# Days to back off from "now" when a download/cost window ends at the present.
+#
+# GLBX.MDP3 historical access has a licence boundary near real time. Passing
+# end = today returns:
+#   422 dataset_unavailable_range -- "requires a subscription and/or license
+#   to access. Try again with an end time before <today>T<HH:MM>Z"
+# Databento's `end` is exclusive, so backing off 2 days keeps requests inside
+# the historical window at the cost of the two most recent sessions.
+DOWNLOAD_END_BUFFER_DAYS: int = 2
+
 # Existing cached data (from prior Databento pull, already on disk)
 EXISTING_DATA_ROOT = r"C:\Users\strik\Downloads\Backtesting Kit\DukascopyStudio\data\futures"
 

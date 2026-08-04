@@ -25,12 +25,23 @@ import pyarrow.parquet as pq
 
 from src.config import (
     ATR_ANCHOR_ET, ATR_BAR_MINUTES, ATR_PERIOD,
-    DATASET, DOWNLOAD_END, DOWNLOAD_START,
+    DATASET, DOWNLOAD_END, DOWNLOAD_END_BUFFER_DAYS, DOWNLOAD_START,
     EXISTING_DATA_ROOT, SCHEMA_1D, SCHEMA_1M, STYPE,
     INSTRUMENTS, DATA_DIR,
 )
 
 log = logging.getLogger("orb.data")
+
+
+def safe_end_date(buffer_days: int = DOWNLOAD_END_BUFFER_DAYS) -> str:
+    """
+    Latest end date that stays inside GLBX.MDP3 historical licensing.
+
+    end = today raises 422 dataset_unavailable_range near the real-time
+    boundary, so back off DOWNLOAD_END_BUFFER_DAYS. `end` is exclusive.
+    """
+    ts = pd.Timestamp.now(tz="UTC").normalize() - pd.Timedelta(days=buffer_days)
+    return ts.strftime("%Y-%m-%d")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DATA = _PROJECT_ROOT / DATA_DIR
@@ -250,7 +261,7 @@ def ensure_data(sym: str, api_key: str | None = None) -> pd.DataFrame:
     else:
         # New instruments: no local backup — download full history from Databento
         start = instr.get("data_start", DOWNLOAD_START)
-        end   = pd.Timestamp.now(tz="UTC").normalize().strftime("%Y-%m-%d")
+        end   = safe_end_date()
         log.info("%s: no local data — downloading %s → %s from Databento", sym, start, end)
         downloaded = _download_databento(sym, start, end, api_key)
         return _merge_and_cache(sym, pd.DataFrame(), downloaded, api_key)
@@ -275,9 +286,9 @@ def ensure_daily(sym: str, api_key: str | None = None) -> pd.DataFrame:
         raise ImportError("pip install databento")
 
     client = db.Historical(key=api_key)
-    # Pull from per-instrument start to today for enrichment
+    # Pull from per-instrument start to the licence-safe end for enrichment
     start = INSTRUMENTS[sym].get("data_start", DOWNLOAD_START)
-    end   = pd.Timestamp.now(tz="UTC").normalize().strftime("%Y-%m-%d")
+    end   = safe_end_date()
     data  = client.timeseries.get_range(
         dataset=DATASET, symbols=[INSTRUMENTS[sym]["continuous_symbol"]],
         schema=SCHEMA_1D, start=start, end=end, stype_in=STYPE,

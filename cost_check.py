@@ -25,6 +25,7 @@ from src.config import (
     DATASET, DOWNLOAD_END, DOWNLOAD_START, INSTRUMENTS,
     SCHEMA_1M, STYPE, DATA_DIR,
 )
+from src.data_layer import safe_end_date
 
 _DATA = _ROOT / DATA_DIR
 
@@ -46,7 +47,9 @@ def main() -> None:
         sys.exit(1)
 
     client = db.Historical(key=api_key)
-    today  = pd.Timestamp.now(tz="UTC").normalize().strftime("%Y-%m-%d")
+    # not today: end = today trips 422 dataset_unavailable_range at the
+    # GLBX.MDP3 real-time licence boundary
+    today  = safe_end_date()
 
     print(f"\n{'Symbol':<6}  {'Asset class':<14}  {'Window':<24}  {'Cost (USD)':>10}")
     print("-" * 62)
