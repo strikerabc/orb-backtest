@@ -25,13 +25,13 @@ from src.config import (
     DATASET, DOWNLOAD_END, DOWNLOAD_START, INSTRUMENTS,
     SCHEMA_1M, STYPE, DATA_DIR,
 )
-from src.data_layer import safe_end_date
+# Import the ROLL-AWARE resolver rather than rebuilding it here. A local
+# copy returning "{sym}_1m.parquet" would resolve GC/ZN/6E/6J to their stale
+# .c.0 files (still on disk) and print "(cached)" for exactly the four
+# instruments that need pricing -- reporting nothing to download.
+from src.data_layer import _cache_path, _roll_tag, safe_end_date
 
 _DATA = _ROOT / DATA_DIR
-
-
-def _cache_path(sym: str) -> Path:
-    return _DATA / f"{sym}_1m.parquet"
 
 
 def main() -> None:
@@ -51,16 +51,18 @@ def main() -> None:
     # GLBX.MDP3 real-time licence boundary
     today  = safe_end_date()
 
-    print(f"\n{'Symbol':<6}  {'Asset class':<14}  {'Window':<24}  {'Cost (USD)':>10}")
-    print("-" * 62)
+    print(f"\n{'Symbol':<6} {'roll':<5} {'Asset class':<14}  "
+          f"{'Window':<24}  {'Cost (USD)':>10}")
+    print("-" * 72)
 
     total = 0.0
     any_missing = False
 
     for sym, instr in INSTRUMENTS.items():
-        cache = _cache_path(sym)
+        cache = _cache_path(sym, SCHEMA_1M)
+        roll = _roll_tag(sym)
         if cache.exists():
-            print(f"{sym:<6}  {'(cached)':>38}")
+            print(f"{sym:<6} {roll:<5} {'(cached: ' + cache.name + ')':<40}")
             continue
 
         any_missing = True
@@ -86,15 +88,21 @@ def main() -> None:
             )
         except Exception as exc:
             cost = float("nan")
-            print(f"{sym:<6}  {asset_class:<14}  {window_str:<24}  ERROR: {exc}")
+            msg = str(exc).split("\n")[0][:70]
+            print(f"{sym:<6} {roll:<5} {asset_class:<14}  {window_str:<24}  "
+                  f"ERROR: {msg}")
             continue
 
         total += cost
-        print(f"{sym:<6}  {asset_class:<14}  {window_str:<24}  ${cost:>9.2f}")
+        print(f"{sym:<6} {roll:<5} {asset_class:<14}  {window_str:<24}  "
+              f"${cost:>9.2f}")
 
-    print("-" * 62)
+    print("-" * 72)
     if any_missing:
-        print(f"{'TOTAL new spend':>44}  ${total:>9.2f}")
+        print(f"{'TOTAL new spend':>54}  ${total:>9.2f}")
+        print()
+        print("Daily (ohlcv-1d) bars are pulled separately by ensure_daily and")
+        print("are a small fraction of the above; 1m dominates the cost.")
     else:
         print("All caches present — no download needed.")
     print()
