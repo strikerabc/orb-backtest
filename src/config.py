@@ -225,17 +225,29 @@ SLIPPAGE_TICKS_ROUND_TRIP: int = 1       # fallback when spread_ticks absent
 # ohlcv-1m carries no bid/ask, so measuring them requires the mbp-1 or tbbo
 # schema (additional Databento spend). Treat as an assumption to be calibrated,
 # and note that results for ETH/BTC are sensitive to it.
+# Per-symbol fallback, used only when a (symbol, session) pair is missing from
+# SLIPPAGE_TICKS_BY_SYMBOL_SESSION below. Every pair the sweep generates is
+# currently present there, so this is a safety net rather than a live path.
+#
+# Each value is the WORST session for that symbol -- conservative, so a missing
+# pair overcharges rather than flatters.
+#
+# Previous values were ESTIMATED and wrong for half the universe:
+#   ETH 10.0 -> 53.14 (undercharged 5.3x)   NQ 1.0 -> 3.16 (3.2x)
+#   BTC  2.0 ->  4.20 (2.1x)                GC 1.0 -> 2.00 (2.0x)
+#   RTY  1.0 ->  2.00 (2.0x)
+# ES, ZN, CL, 6E and 6J measured at ~1 tick, confirming those five estimates.
 SLIPPAGE_TICKS_BY_SYMBOL: dict[str, float] = {
-    "ES":  1.0,    # 1-tick market, extremely liquid
-    "NQ":  1.0,
-    "RTY": 1.0,
-    "GC":  1.0,
-    "CL":  1.0,
-    "ZN":  1.0,    # 1/64 market, tight
-    "6E":  1.0,
-    "6J":  1.0,
-    "BTC": 2.0,    # tick $5; spread often $5-25
-    "ETH": 10.0,   # tick $0.05; spread commonly $0.50+ -> ~10 ticks
+    "ES":   1.00,   # worst: NY
+    "NQ":   3.16,   # worst: TOK
+    "RTY":  2.00,   # worst: NY (only session)
+    "GC":   2.00,   # worst: LDN/TOK
+    "CL":   1.05,   # worst: LDN
+    "ZN":   1.00,   # worst: NY
+    "6E":   1.00,   # worst: LDN
+    "6J":   1.00,   # worst: TOK
+    "BTC":  4.20,   # worst: TOK
+    "ETH": 53.14,   # worst: TOK
 }
 
 # Per-(symbol, session) slippage override, in TICKS. Takes precedence over
@@ -253,15 +265,65 @@ SLIPPAGE_TICKS_BY_SYMBOL: dict[str, float] = {
 # than by trades taken (LDN's 4h window contributes more quotes than NY's
 # 2.5h), which is an arbitrary weighting with no economic meaning.
 #
-# Populate from measure_spreads.py, which reports per-session medians.
-# Empty means "fall back to the per-symbol value".
-SLIPPAGE_TICKS_BY_SYMBOL_SESSION: dict[tuple[str, str], float] = {}
+# MEASURED via bbo-1m, sampled 2020-06 / 2022-06 / 2024-06 (29 instrument-
+# months, $1.13). Values are ENTRY-WEIGHTED: each minute's median spread
+# weighted by the empirical fraction of real entries landing in that minute,
+# because ORB entries cluster after the range completes rather than spreading
+# evenly across the session.
+#
+# Fractional on purpose. "You cannot cross a fraction of a tick" holds for a
+# single trade but not for an expectation: a spread that is 2 ticks 80% of the
+# time and 3 ticks 20% costs exactly 2.2 ticks on average. Rounding up turned
+# a measured 1.001t into 2.0t (a 100% overcharge) in an earlier pass.
+#
+# Entry-weighting proved to matter far less than expected: 22 of 25
+# symbol-sessions came within 1.00-1.07x of their plain session median. Only
+# GC NY (1.59x) and ETH LDN (1.16x) deviated materially.
+SLIPPAGE_TICKS_BY_SYMBOL_SESSION: dict[tuple[str, str], float] = {
+    # ── final: timing weights from instruments untouched by the roll fix ──
+    ("ES",  "NY"):   1.00,
+    ("ES",  "LDN"):  1.00,
+    ("ES",  "TOK"):  1.00,
+    ("NQ",  "NY"):   2.04,
+    ("NQ",  "LDN"):  3.14,
+    ("NQ",  "TOK"):  3.16,
+    ("RTY", "NY"):   2.00,
+    ("CL",  "NY"):   1.03,
+    ("CL",  "LDN"):  1.05,
+    ("BTC", "NY"):   3.16,
+    ("BTC", "LDN"):  3.59,
+    ("BTC", "TOK"):  4.20,
+    ("ETH", "NY"):  32.08,   # was estimated 10.0 -- undercharged 3.2x
+    ("ETH", "LDN"): 34.77,   # entries pay 1.16x the session median
+    ("ETH", "TOK"): 53.14,   # was estimated 10.0 -- undercharged 5.3x
+    # ── provisional: max(entry-weighted, session median) ─────────────────
+    # These four switched to .v.0, so their entry TIMING came from the broken
+    # .c.0 trade log (GC had only 7,512 rows). Quote data is correct .v.0, but
+    # the weights may shift after re-download. Taking the max avoids
+    # understating cost on weights that are not yet final. Re-derive with
+    # analyse_entry_spreads.py after the sweep and tighten if warranted.
+    ("GC",  "NY"):   1.59,   # entry-wtd 1.59 > sess med 1.00
+    ("GC",  "LDN"):  2.00,   # sess med 2.00 > entry-wtd 1.73
+    ("GC",  "TOK"):  2.00,   # sess med 2.00 > entry-wtd 1.92
+    ("ZN",  "NY"):   1.00,
+    ("ZN",  "LDN"):  1.00,
+    ("6E",  "LDN"):  1.00,
+    ("6E",  "NY"):   1.00,
+    ("6J",  "TOK"):  1.00,
+    ("6J",  "LDN"):  1.00,
+    ("6J",  "NY"):   1.00,
+}
 
-# Provenance of the slippage numbers currently in use. Flip to "measured"
-# per symbol as real spreads land, so the report can state which instruments
-# rest on assumptions rather than measurements.
-SLIPPAGE_PROVENANCE: dict[str, str] = {s: "estimated" for s in
-                                       SLIPPAGE_TICKS_BY_SYMBOL}
+# Provenance of the slippage numbers currently in use, so the report can state
+# which instruments rest on measurements rather than assumptions.
+#   measured    — bbo-1m quotes, entry-weighted, timing weights final
+#   provisional — bbo-1m quotes, but entry timing from pre-roll-fix trade log
+SLIPPAGE_PROVENANCE: dict[str, str] = {
+    "ES": "measured",  "NQ": "measured",  "RTY": "measured",
+    "CL": "measured",  "BTC": "measured", "ETH": "measured",
+    "GC": "provisional", "ZN": "provisional",
+    "6E": "provisional", "6J": "provisional",
+}
 
 # Minimum fillable take-profit distance, in ticks.
 #

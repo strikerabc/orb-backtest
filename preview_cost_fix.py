@@ -32,9 +32,11 @@ sys.path.insert(0, str(_ROOT))
 
 from src.config import (
     COMMISSION_PER_SIDE_USD, INSTRUMENTS, MIN_TP_TICKS,
-    MIN_TRADES_FOR_RANKING, OUTPUTS_DIR,
+    MIN_TRADES_FOR_RANKING, OUTPUTS_DIR, SLIPPAGE_PROVENANCE,
     SLIPPAGE_TICKS_BY_SYMBOL, SLIPPAGE_TICKS_ROUND_TRIP,
 )
+# The engine's own resolver, imported rather than reimplemented.
+from src.trade_sim import slippage_ticks_for
 
 _OUT = _ROOT / OUTPUTS_DIR
 pd.set_option("display.width", 220)
@@ -61,11 +63,15 @@ def main() -> None:
     tl = tl[tl["exit_reason"] != "INVALID"].copy()
     print(f"loaded {len(tl):,} valid trades")
 
-    # ── recompute cost under per-symbol slippage ───────────────────────────
+    # ── recompute cost under MEASURED per-(symbol, session) slippage ───────
+    # Uses the same resolver the engine uses, so this preview cannot drift
+    # from production behaviour -- the mistake made three times already this
+    # session was a second copy of lookup logic diverging from the real one.
     tv = tl["instrument"].map(lambda s: INSTRUMENTS[s]["tick_value_usd"])
     slip_old = float(SLIPPAGE_TICKS_ROUND_TRIP)
-    slip_new = tl["instrument"].map(
-        lambda s: SLIPPAGE_TICKS_BY_SYMBOL.get(s, SLIPPAGE_TICKS_ROUND_TRIP))
+    slip_new = [slippage_ticks_for(s, sess) for s, sess
+                in zip(tl["instrument"], tl["session"])]
+    slip_new = pd.Series(slip_new, index=tl.index, dtype=float)
 
     comm_ticks = 2.0 * COMMISSION_PER_SIDE_USD / tv
     rt = tl["r_ticks"].replace(0, np.nan)
@@ -129,20 +135,47 @@ def main() -> None:
         top = new_pos.sort_values("exp_net_new", ascending=False).head(15)
         print(top.round(4).to_string(index=False))
 
-    # ── null test is unaffected by costs ───────────────────────────────────
-    hr("4. NULL TEST — UNCHANGED BY ANY COST FIX")
-    if "null_p_value" in old.columns:
-        sig = old_rank[old_rank["null_p_value"] < 0.05]
-        print("  null_p_value compares GROSS expectancy against random entry,")
-        print("  so it does not move when the cost model changes.")
-        print(f"\n  rankable variants with null_p < 0.05 : {len(sig)}")
-        print(f"  rankable variants with null_p < 0.10 : "
-              f"{len(old_rank[old_rank['null_p_value'] < 0.10])}")
-        print(f"  best (lowest) null_p_value           : "
-              f"{old_rank['null_p_value'].min():.4f}")
-        print("\n  Under a 5% threshold across 6,168 variants, ~308 false")
-        print("  positives would be EXPECTED from pure chance. Observing 0 is")
-        print("  materially worse than chance and indicates no edge is present.")
+    # ── null test: the STORED values are void, not merely stale ────────────
+    hr("4. NULL TEST — STORED VALUES ARE VOID, NOT USABLE")
+    print("  The null_p_value column in summary.parquet came from the BROKEN")
+    print("  statistic and must not be read at all -- not even as a baseline.")
+    print()
+    print("  It compared an observed MEAN against a pool of INDIVIDUAL random")
+    print("  trades, so it tracked the random-entry TP hit rate ~1/(1+rr)")
+    print("  rather than any tail probability:")
+    print("      corr(null_p, expectancy_gross_r) = -0.0977   <- ~zero")
+    print("      corr(null_p, win_rate)           = +0.6594")
+    print("      min null_p observed              =  0.1661   <- a floor")
+    print()
+    print("  p < 0.05 was UNREACHABLE BY CONSTRUCTION. An earlier version of")
+    print("  this script concluded '0 of 6,168 significant, ~308 expected by")
+    print("  chance, therefore no edge'. That reasoning is RETRACTED: the")
+    print("  ~308 figure assumes a uniform null p-distribution, which that")
+    print("  statistic never produced. The test was evidence of nothing.")
+    print()
+    print(f"  Net-positive under measured costs : {len(new_pos)}")
+    print("  Surviving a CALIBRATED null test  : UNKNOWN until main.py re-runs")
+    print()
+    print("  The rewritten test (null_calibrator.py) bootstraps null MEANS at")
+    print("  the observed sample size. Validated synthetically: mean p 0.4884")
+    print("  (target 0.50), 100% power on a +0.30 R edge at rr=1.0, but only")
+    print("  47.5% power on a +0.15 R edge at rr=2.0 -- so a null result at")
+    print("  high rr is weak evidence, not proof of absence.")
+
+    # ── provenance of the cost model itself ────────────────────────────────
+    hr("5. COST-MODEL PROVENANCE")
+    print("  Slippage is now MEASURED (bbo-1m, entry-weighted), not estimated.")
+    print("  Where entry TIMING came from the pre-roll-fix trade log, values")
+    print("  are marked provisional and use max(entry-weighted, session median).")
+    print()
+    for sym in sorted(SLIPPAGE_PROVENANCE):
+        tag = SLIPPAGE_PROVENANCE[sym]
+        mark = "" if tag == "measured" else "   <- timing weights not yet final"
+        print(f"    {sym:<5} {tag}{mark}")
+    print()
+    print("  Still excluded from every figure above: MARKET IMPACT. Measured")
+    print("  spread is the quoted spread at the entry minute; ORB entries cross")
+    print("  a book in motion, so these remain LOWER BOUNDS on true cost.")
 
     print("\n" + "=" * 104 + "\n")
 

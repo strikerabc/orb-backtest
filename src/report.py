@@ -9,7 +9,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.config import MIN_TRADES_FOR_RANKING
+from src.config import (
+    MIN_TRADES_FOR_RANKING, SLIPPAGE_PROVENANCE,
+    SLIPPAGE_TICKS_BY_SYMBOL_SESSION,
+)
 
 log = logging.getLogger("orb.report")
 
@@ -142,6 +145,32 @@ def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
         lines.append(cov.sort_values("rows").to_markdown(index=False))
         lines.append("")
 
+    # ── cost-model provenance ──────────────────────────────────────────────
+    lines += ["---", "## Cost-Model Provenance", "",
+              "Slippage is measured, not assumed. Values below are round-trip",
+              "ticks from `bbo-1m` quotes (2020-06 / 2022-06 / 2024-06),",
+              "entry-weighted by the empirical distribution of entry minutes.",
+              "",
+              "`provisional` means the quote data is correct but the entry-timing",
+              "weights came from the pre-roll-fix trade log, so those values use",
+              "max(entry-weighted, session median) to avoid understating cost.",
+              ""]
+    prov_rows = []
+    for sym in sorted(SLIPPAGE_PROVENANCE):
+        per_sess = {s: v for (sy, s), v in
+                    SLIPPAGE_TICKS_BY_SYMBOL_SESSION.items() if sy == sym}
+        prov_rows.append({
+            "instrument": sym,
+            "provenance": SLIPPAGE_PROVENANCE[sym],
+            "slippage_ticks": ", ".join(f"{s}={v:g}" for s, v in per_sess.items())
+                              or "(fallback)",
+        })
+    lines.append(pd.DataFrame(prov_rows).to_markdown(index=False))
+    lines += ["",
+              "Measured spread is a **floor** on execution cost: it excludes",
+              "market impact, and ORB entries cross a book in motion.",
+              ""]
+
     lines += ["---",
               f"## Top 20 Variants by Gross Expectancy (>= {MIN_TRADES_FOR_RANKING} trades)",
               ""]
@@ -206,7 +235,15 @@ def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
         "- All R values are gross unless labelled net.",
         "- `atr_exceeds_cap` flag marks trades where TP > 2.5 × 4h ATR (simulated anyway; filter in analysis).",
         "- `same_bar_ambiguous` flag: SL and TP both hit within entry bar — SL assumed first (conservative).",
-        "- Net R uses default cost model: 1 tick round-trip slippage + $2.50/side commission (see config.py).",
+        "- Net R cost model: MEASURED per-(instrument, session) slippage "
+        "+ $2.50/side commission (see config.py). Slippage came from bbo-1m "
+        "quotes sampled 2020-06 / 2022-06 / 2024-06, entry-weighted by the "
+        "empirical distribution of entry minutes. It is NOT a flat 1 tick: "
+        "measured values range from 1.00 (ES, ZN, CL, 6E, 6J) to 53.14 ticks "
+        "(ETH TOK).",
+        "- **Measured spread is a FLOOR on execution cost.** It excludes "
+        "market impact, and ORB entries cross a book in motion. Net R is "
+        "therefore optimistic by an unquantified margin.",
         "- CI is 95% block-bootstrap (block=5 days). Top performers may be inflated by selection bias.",
         "- Null calibration p-values show fraction of random-entry runs beating each variant.",
     ]
