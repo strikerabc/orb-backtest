@@ -50,7 +50,7 @@ import pandas as pd
 _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
-from src.config import INSTRUMENTS, OUTPUTS_DIR, SESSIONS
+from src.config import INSTRUMENTS, OUTPUTS_DIR, SESSIONS, INVALID_REASONS
 from src.data_layer import ensure_data, ensure_daily, _compute_enrichment
 from src.entry_detector import EntrySignal
 from src.null_calibrator import (
@@ -135,7 +135,7 @@ def _run_null(sds, rm, direction, rr, kind, r_pool, seed=99):
             if es is None:
                 continue
             tr = simulate_trade(es, sd, rr_levels=[rr])
-            if tr and tr[0].exit_reason not in ("INVALID", None):
+            if tr and tr[0].exit_reason not in INVALID_REASONS:
                 t = tr[0]
                 vals.append(t.gross_r)
                 amb.append(t.same_bar_ambiguous)
@@ -164,7 +164,7 @@ def main() -> None:
         "instrument", "session", "range_minutes", "entry_mode", "direction",
         "rr", "r_ticks", "gross_r", "exit_reason", "same_bar_ambiguous",
     ])
-    tl = tl[tl["exit_reason"] != "INVALID"]
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)]
 
     syms = sorted({c[0] for c in CASES})
     data = {}

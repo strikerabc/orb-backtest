@@ -26,13 +26,16 @@ import pandas as pd
 from src.config import INSTRUMENTS, SESSIONS, RR_LEVELS, OUTPUTS_DIR, SCHEMA_1M
 from src.data_layer import (
     ensure_data, ensure_daily, _compute_enrichment, _cache_path, _roll_tag,
+    vendor_boundary_diagnostics,
 )
 from src.range_builder import build_session_days, SessionDay
 from src.entry_detector import detect_entries
 from src.trade_sim import simulate_trade
 from src.journal import build_row
 from src.regime_sampler import select_windows, filter_to_window
-from src.null_calibrator import build_r_ticks_map, enrich_summary_with_null
+from src.null_calibrator import (
+    build_r_ticks_map, enrich_summary_with_null, write_null_artifacts,
+)
 from src.stats import compute_summary, compute_regime_summary
 from src.report import write_report
 
@@ -94,6 +97,7 @@ def run() -> None:
     # ── 1. Load / build data ───────────────────────────────────────────────
     data: dict[str, pd.DataFrame] = {}
     daily: dict[str, pd.DataFrame] = {}
+    boundary_diagnostics: list[pd.DataFrame] = []
     for sym, instr in INSTRUMENTS.items():
         df_1m   = ensure_data(sym, api_key)
         df_1d   = ensure_daily(sym, api_key)
@@ -101,16 +105,24 @@ def run() -> None:
                                       tick_size=instr["tick_size"])
         data[sym]  = df_enr
         daily[sym] = df_1d
+        diag = vendor_boundary_diagnostics(df_1m, sym)
+        if not diag.empty:
+            boundary_diagnostics.append(diag)
         log.info("%s (%s): %d bars enriched",
                  sym, instr.get("asset_class", "?"), len(df_enr))
 
     # ── 2. Select regime windows ───────────────────────────────────────────
-    # Use the union of all data to determine span
-    all_ts   = pd.concat([d["timestamp"] for d in data.values()])
-    data_start = all_ts.min().date()
-    data_end   = all_ts.max().date()
-    windows  = select_windows(data_start, data_end)
-    log.info("Selected %d regime windows", len(windows))
+    windows_by_symbol = {
+        sym: select_windows(df["timestamp"].min().date(),
+                            df["timestamp"].max().date())
+        for sym, df in data.items()
+    }
+    window_lookup = {
+        (sym, window.index): window
+        for sym, windows in windows_by_symbol.items() for window in windows
+    }
+    log.info("Selected realised regime counts: %s",
+             {sym: len(windows) for sym, windows in windows_by_symbol.items()})
 
     # ── 3. Build per-window session-day lists ─────────────────────────────
     # session_days_map[(sym, sess)] → flat list across ALL windows (for null calibration)
@@ -120,11 +132,13 @@ def run() -> None:
     for sym, df_full in data.items():
         applicable_sessions = INSTRUMENTS[sym].get("sessions", list(SESSIONS.keys()))
         for sess_name in applicable_sessions:
-            for w in windows:
+            for w in windows_by_symbol[sym]:
                 df_w = filter_to_window(df_full, w)
                 if len(df_w) == 0:
                     continue
                 sdays = build_session_days(df_w, sym, sess_name)
+                for sd in sdays:
+                    sd.regime_window = w.index
                 window_session_days[(w.index, sym, sess_name)] = sdays
                 key = (sym, sess_name)
                 session_days_map.setdefault(key, []).extend(sdays)
@@ -133,7 +147,7 @@ def run() -> None:
     all_rows: list[dict] = []
 
     for (w_idx, sym, sess_name), sdays in window_session_days.items():
-        w = windows[w_idx]
+        w = window_lookup[(sym, w_idx)]
         log.info("Window %02d  %s %s  %d session-days",
                  w_idx, sym, sess_name, len(sdays))
         for sd in sdays:
@@ -165,7 +179,12 @@ def run() -> None:
     log.info("Building observed r_ticks map for matched null...")
     r_map = build_r_ticks_map(trade_log)
     log.info("Running null calibration (matched-stop random-entry benchmark)...")
-    summary = enrich_summary_with_null(summary, session_days_map, r_map)
+    summary = enrich_summary_with_null(
+        summary, session_days_map, r_map, trade_log=trade_log)
+    write_null_artifacts(summary, _OUT)
+    if boundary_diagnostics:
+        pd.concat(boundary_diagnostics, ignore_index=True).to_csv(
+            _OUT / "vendor_boundary_diagnostics.csv", index=False)
 
     # ── 7. Write outputs ──────────────────────────────────────────────────
     write_report(summary, regime_summary, trade_log, _OUT)

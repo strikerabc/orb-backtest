@@ -51,7 +51,7 @@ import pandas as pd
 _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
-from src.config import INSTRUMENTS, OUTPUTS_DIR, RR_LEVELS
+from src.config import INSTRUMENTS, OUTPUTS_DIR, RR_LEVELS, INVALID_REASONS
 from src.data_layer import ensure_data, ensure_daily, _compute_enrichment
 from src.range_builder import build_session_days
 from src.regime_sampler import select_windows, filter_to_window
@@ -92,7 +92,7 @@ def main() -> None:
         "instrument", "session", "range_minutes", "entry_mode", "direction",
         "rr", "r_ticks", "gross_r", "exit_reason",
     ])
-    tl = tl[tl["exit_reason"] != "INVALID"]
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)]
 
     syms = sorted({c[0] for c in CASES})
     data: dict[str, pd.DataFrame] = {}
@@ -140,7 +140,7 @@ def main() -> None:
                 if es is None:
                     continue
                 tr = simulate_trade(es, sd, rr_levels=[rr])
-                if tr and tr[0].exit_reason not in ("INVALID", None):
+                if tr and tr[0].exit_reason not in INVALID_REASONS:
                     n_r.append(tr[0].r_ticks)
                     n_gr.append(tr[0].gross_r)
                     n_time.append(tr[0].exit_reason == "TIME")

@@ -13,10 +13,11 @@ from typing import Optional
 import numpy as np
 
 from src.config import (
-    ATR_CAP_MULTIPLE, COMMISSION_PER_SIDE_USD, INSTRUMENTS, MIN_TP_TICKS,
+    ATR_CAP_MULTIPLE, INSTRUMENTS, MIN_TP_TICKS,
     RR_LEVELS, SLIPPAGE_TICKS_BY_SYMBOL, SLIPPAGE_TICKS_BY_SYMBOL_SESSION,
     SLIPPAGE_TICKS_ROUND_TRIP,
 )
+from src.contracts import round_trip_commission_usd
 from src.entry_detector import EntrySignal
 from src.range_builder import SessionDay
 
@@ -30,7 +31,7 @@ class TradeResult:
     r_ticks: float             # |entry - sl| in ticks
     exit_price: float
     exit_bar_idx: int
-    exit_reason: str           # 'TP' | 'SL' | 'TIME' | 'ATR_INVALIDATED'
+    exit_reason: str           # TP | SL | TIME | an explicit invalid reason
     gross_r: float
     net_r: float
     gross_usd: float
@@ -43,6 +44,8 @@ class TradeResult:
     tp_to_atr_ratio: Optional[float]
     tp_ticks: float            # rr * r_ticks — TP distance from entry
     tp_unfillable: bool        # True if tp_ticks < MIN_TP_TICKS (inside spread)
+    cost_r: float = np.nan
+    gross_r_optimistic: float = np.nan
 
 
 def slippage_ticks_for(sym: str | None, session: str | None = None) -> float:
@@ -81,15 +84,83 @@ def _round_cost_r(r_ticks: float, tick_value_usd: float,
     if r_ticks <= 0:
         return 0.0
     slip = slippage_ticks_for(sym, session)
-    comm_ticks = 2.0 * COMMISSION_PER_SIDE_USD / tick_value_usd
+    comm_ticks = round_trip_commission_usd(sym or "") / tick_value_usd
     total_ticks = comm_ticks + slip
     return total_ticks / r_ticks
 
 
-def simulate_trade(
+def _first_true(mask: np.ndarray) -> int:
+    idx = np.flatnonzero(mask)
+    return int(idx[0]) if len(idx) else len(mask)
+
+
+def _first_touch_vectorized(
+    o: np.ndarray, h: np.ndarray, l: np.ndarray,
+    sl: float, tp: float, tick: float, is_long: bool,
+) -> tuple[int, float, str, bool]:
+    """Return first exit using monotone extrema/searchsorted semantics."""
+    n = len(o)
+    if is_long:
+        run_min_o = np.minimum.accumulate(np.where(np.isnan(o), np.inf, o))
+        run_max_o = np.maximum.accumulate(np.where(np.isnan(o), -np.inf, o))
+        run_min_l = np.minimum.accumulate(np.where(np.isnan(l), np.inf, l))
+        run_max_h = np.maximum.accumulate(np.where(np.isnan(h), -np.inf, h))
+        i_gsl = int(np.searchsorted(-run_min_o, -sl, side="left"))
+        i_gtp = int(np.searchsorted(run_max_o, tp, side="left"))
+        i_sl = int(np.searchsorted(-run_min_l, -sl, side="left"))
+        i_tp = int(np.searchsorted(run_max_h, tp + tick, side="left"))
+    else:
+        run_max_o = np.maximum.accumulate(np.where(np.isnan(o), -np.inf, o))
+        run_min_o = np.minimum.accumulate(np.where(np.isnan(o), np.inf, o))
+        run_max_h = np.maximum.accumulate(np.where(np.isnan(h), -np.inf, h))
+        run_min_l = np.minimum.accumulate(np.where(np.isnan(l), np.inf, l))
+        i_gsl = int(np.searchsorted(run_max_o, sl, side="left"))
+        i_gtp = int(np.searchsorted(-run_min_o, -tp, side="left"))
+        i_sl = int(np.searchsorted(run_max_h, sl, side="left"))
+        i_tp = int(np.searchsorted(-run_min_l, -(tp - tick), side="left"))
+
+    i = min(i_gsl, i_gtp, i_sl, i_tp)
+    if i >= n:
+        return n - 1, np.nan, "TIME", False
+    if i_gsl == i:
+        return i, float(o[i]), "SL", False
+    if i_gtp == i:
+        return i, float(o[i]), "TP", False
+
+    sl_hit = bool(l[i] <= sl) if is_long else bool(h[i] >= sl)
+    tp_hit = bool(h[i] >= tp + tick) if is_long else bool(l[i] <= tp - tick)
+    if sl_hit:
+        return i, sl, "SL", tp_hit
+    return i, tp, "TP", False
+
+
+def _first_touch_reference(
+    o: np.ndarray, h: np.ndarray, l: np.ndarray,
+    sl: float, tp: float, tick: float, is_long: bool,
+) -> tuple[int, float, str, bool]:
+    """Readable O(bars) oracle retained for randomized equivalence tests."""
+    for i, (bar_o, bar_h, bar_l) in enumerate(zip(o, h, l)):
+        gap_sl = (bar_o <= sl) if is_long else (bar_o >= sl)
+        gap_tp = (bar_o >= tp) if is_long else (bar_o <= tp)
+        if gap_sl:
+            return i, float(bar_o), "SL", False
+        if gap_tp:
+            return i, float(bar_o), "TP", False
+        sl_hit = (bar_l <= sl) if is_long else (bar_h >= sl)
+        tp_hit = (bar_h >= tp + tick) if is_long else (bar_l <= tp - tick)
+        if sl_hit:
+            return i, sl, "SL", bool(tp_hit)
+        if tp_hit:
+            return i, tp, "TP", False
+    return len(o) - 1, np.nan, "TIME", False
+
+
+def _simulate_trade(
     es: EntrySignal,
     sd: SessionDay,
     rr_levels: list[float] = RR_LEVELS,
+    *,
+    reference: bool = False,
 ) -> list[TradeResult]:
     """
     For each RR level, simulate the exit and return a TradeResult.
@@ -108,19 +179,26 @@ def simulate_trade(
     cost_r   = _round_cost_r(r_ticks, tv_usd, sd.instrument, sd.session)
     atr      = sd.atr_4h
 
-    if r <= 0 or r_ticks < 1:
-        # Degenerate stop — mark all variants invalidated
-        return [_invalid_result(rr, entry, sl, r_ticks) for rr in rr_levels]
+    wrong_side = (sl >= entry) if is_long else (sl <= entry)
+    if wrong_side or r <= 0 or r_ticks < 1:
+        reason = "SL_WRONG_SIDE" if wrong_side else "DEGENERATE_R"
+        return [_invalid_result(rr, entry, sl, r_ticks, reason) for rr in rr_levels]
 
-    # Bars from entry bar onward (inclusive)
-    start = es.entry_bar_idx
+    start = es.entry_bar_idx + (1 if es.fill_at_bar_close else 0)
+    assert start >= getattr(sd, "session_open_idx", 0)
+    if start >= len(sd.bars_h):
+        return [_invalid_result(rr, entry, sl, r_ticks, "NO_HOLD_BARS")
+                for rr in rr_levels]
     h_arr = sd.bars_h[start:]
     l_arr = sd.bars_l[start:]
     o_arr = sd.bars_o[start:]
     c_arr = sd.bars_c[start:]
     nb    = len(h_arr)
 
-    # Precompute running MAE and MFE arrays
+    if nb == 0:
+        return [_invalid_result(rr, entry, sl, r_ticks, "NO_HOLD_BARS")
+                for rr in rr_levels]
+
     if is_long:
         adverse   = entry - l_arr          # positive = adverse
         favorable = h_arr - entry          # positive = favorable
@@ -140,65 +218,21 @@ def simulate_trade(
         exceeds_cap = bool(tp_to_atr is not None and tp_to_atr > ATR_CAP_MULTIPLE)
         tp_used = tp_raw   # we always simulate; mark flag for post-analysis filtering
 
-        exit_price = np.nan
-        exit_bar   = nb - 1
-        exit_reason = "TIME"
-        same_bar_flag = False
-
-        for i in range(nb):
-            bar_o = o_arr[i]; bar_h = h_arr[i]; bar_l = l_arr[i]
-
-            # Check gap opens (bar opens beyond SL or TP before price moves)
-            if is_long:
-                gap_sl = bar_o <= sl     # bar opened at or below stop
-                gap_tp = bar_o >= tp_used
-            else:
-                gap_sl = bar_o >= sl
-                gap_tp = bar_o <= tp_used
-
-            if gap_sl:
-                exit_price  = bar_o
-                exit_reason = "SL"
-                exit_bar    = i
-                break
-            if gap_tp:
-                exit_price  = bar_o
-                exit_reason = "TP"
-                exit_bar    = i
-                break
-
-            # Normal intrabar check
-            sl_hit = (bar_l <= sl) if is_long else (bar_h >= sl)
-            tp_hit = (bar_h >= tp_used) if is_long else (bar_l <= tp_used)
-
-            if sl_hit and tp_hit:
-                # Both hit same bar — SL first (conservative)
-                exit_price    = sl
-                exit_reason   = "SL"
-                exit_bar      = i
-                same_bar_flag = True
-                break
-            if sl_hit:
-                exit_price  = sl
-                exit_reason = "SL"
-                exit_bar    = i
-                break
-            if tp_hit:
-                exit_price  = tp_used
-                exit_reason = "TP"
-                exit_bar    = i
-                break
+        finder = _first_touch_reference if reference else _first_touch_vectorized
+        exit_bar, exit_price, exit_reason, same_bar_flag = finder(
+            o_arr, h_arr, l_arr, sl, tp_used, tick, is_long)
 
         if np.isnan(exit_price):
             exit_price = c_arr[-1]   # time exit at close of last (11:59) bar
 
         gross_r   = sign * (exit_price - entry) / r
-        net_r     = gross_r - cost_r if gross_r >= 0 else gross_r - cost_r
+        net_r     = gross_r - cost_r
         gross_usd = gross_r * r_ticks * tv_usd
         net_usd   = net_r   * r_ticks * tv_usd
 
-        mae_r = -float(adverse[:exit_bar + 1].max())  / r   # negative value
-        mfe_r =  float(favorable[:exit_bar + 1].max()) / r  # positive value
+        mae_r = -max(0.0, float(adverse[:exit_bar + 1].max())) / r
+        mfe_r = max(0.0, float(favorable[:exit_bar + 1].max())) / r
+        gross_r_optimistic = rr if same_bar_flag else gross_r
 
         results.append(TradeResult(
             rr=rr, tp_price_uncapped=tp_raw, tp_price_used=tp_used,
@@ -214,18 +248,38 @@ def simulate_trade(
             tp_to_atr_ratio=round(tp_to_atr, 4) if tp_to_atr else None,
             tp_ticks=round(tp_ticks_val, 4),
             tp_unfillable=tp_unfillable_flag,
+            cost_r=round(cost_r, 4),
+            gross_r_optimistic=round(gross_r_optimistic, 4),
         ))
 
     return results
 
 
-def _invalid_result(rr: float, entry: float, sl: float, r_ticks: float) -> TradeResult:
+def simulate_trade(
+    es: EntrySignal,
+    sd: SessionDay,
+    rr_levels: list[float] = RR_LEVELS,
+) -> list[TradeResult]:
+    return _simulate_trade(es, sd, rr_levels, reference=False)
+
+
+def _simulate_trade_reference(
+    es: EntrySignal,
+    sd: SessionDay,
+    rr_levels: list[float] = RR_LEVELS,
+) -> list[TradeResult]:
+    return _simulate_trade(es, sd, rr_levels, reference=True)
+
+
+def _invalid_result(rr: float, entry: float, sl: float, r_ticks: float,
+                    reason: str = "INVALID") -> TradeResult:
     return TradeResult(
         rr=rr, tp_price_uncapped=np.nan, tp_price_used=np.nan,
         sl_price=sl, r_ticks=r_ticks,
-        exit_price=np.nan, exit_bar_idx=-1, exit_reason="INVALID",
+        exit_price=np.nan, exit_bar_idx=-1, exit_reason=reason,
         gross_r=np.nan, net_r=np.nan, gross_usd=np.nan, net_usd=np.nan,
         mae_r=np.nan, mfe_r=np.nan, bars_held=0,
         same_bar_ambiguous=False, atr_exceeds_cap=False, tp_to_atr_ratio=None,
         tp_ticks=np.nan, tp_unfillable=False,
+        cost_r=np.nan, gross_r_optimistic=np.nan,
     )

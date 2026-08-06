@@ -31,12 +31,13 @@ _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
 from src.config import (
-    COMMISSION_PER_SIDE_USD, INSTRUMENTS, MIN_TP_TICKS,
+    INSTRUMENTS, MIN_TP_TICKS,
     MIN_TRADES_FOR_RANKING, OUTPUTS_DIR, SLIPPAGE_PROVENANCE,
-    SLIPPAGE_TICKS_BY_SYMBOL, SLIPPAGE_TICKS_ROUND_TRIP,
+    SLIPPAGE_TICKS_BY_SYMBOL, SLIPPAGE_TICKS_ROUND_TRIP, INVALID_REASONS,
 )
 # The engine's own resolver, imported rather than reimplemented.
 from src.trade_sim import slippage_ticks_for
+from src.contracts import DEFAULT_RT_COMMISSION_USD
 
 _OUT = _ROOT / OUTPUTS_DIR
 pd.set_option("display.width", 220)
@@ -60,7 +61,7 @@ def main() -> None:
 
     cols = VARIANT_KEYS + ["r_ticks", "gross_r", "net_r", "exit_reason"]
     tl = pd.read_parquet(tl_p, columns=cols)
-    tl = tl[tl["exit_reason"] != "INVALID"].copy()
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)].copy()
     print(f"loaded {len(tl):,} valid trades")
 
     # ── recompute cost under MEASURED per-(symbol, session) slippage ───────
@@ -73,7 +74,7 @@ def main() -> None:
                 in zip(tl["instrument"], tl["session"])]
     slip_new = pd.Series(slip_new, index=tl.index, dtype=float)
 
-    comm_ticks = 2.0 * COMMISSION_PER_SIDE_USD / tv
+    comm_ticks = DEFAULT_RT_COMMISSION_USD / tv
     rt = tl["r_ticks"].replace(0, np.nan)
 
     tl["cost_r_old"] = (comm_ticks + slip_old) / rt

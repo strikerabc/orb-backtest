@@ -29,7 +29,9 @@ import numpy as np
 import pandas as pd
 
 from .sizing import MAX_CONTRACTS, MAX_RISK_USD
-from .trade_sim import slippage_ticks_for
+# One source for the round-trip commission used by the sweep. Contract-specific
+# entries below override this where available.
+DEFAULT_RT_COMMISSION_USD = 3.10
 
 # ── Contract specs ───────────────────────────────────────────────────────────
 # tick_value_usd for the micro is 1/10 of the full-size in every pair below
@@ -70,6 +72,12 @@ def comm_ticks(sym: str, kind: str) -> float:
     return c["rt_commission_usd"] / c["tick_value_usd"]
 
 
+def round_trip_commission_usd(sym: str, kind: str = "full") -> float:
+    """Commission used by simulation and account-level repricing."""
+    return float(CONTRACTS.get(sym, {}).get(kind, {}).get(
+        "rt_commission_usd", DEFAULT_RT_COMMISSION_USD))
+
+
 def cost_ticks(sym: str, kind: str, session: str) -> float:
     """Total round-trip friction in ticks: commission + measured slippage.
 
@@ -78,6 +86,8 @@ def cost_ticks(sym: str, kind: str, session: str) -> float:
     which is broadly true for MES/MNQ but is an optimistic assumption, not a
     measurement.
     """
+    from .trade_sim import slippage_ticks_for
+
     return comm_ticks(sym, kind) + slippage_ticks_for(sym, session)
 
 

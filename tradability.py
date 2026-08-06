@@ -29,6 +29,7 @@ from src.sizing import (MAX_CONTRACTS, MAX_RISK_USD, MAX_FRICTION_R,
                         MIN_EXECUTABLE_SL_TICKS, MIN_EXECUTABLE_TP_TICKS,
                         contracts_for, tick_value)
 from src.trade_sim import slippage_ticks_for
+from src.filters import trade_eligibility
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
@@ -46,23 +47,9 @@ def load() -> pd.DataFrame:
     log.info("reading %s ...", TRADE_LOG)
     df = pq.read_table(TRADE_LOG, columns=COLS).to_pandas()
     log.info("  %d rows", len(df))
-    # Match stats.py: unfillable-TP trades are not real fills.
-    mask = df["tp_unfillable"].fillna(False).astype(bool)
-    if mask.any():
-        log.info("  dropping %d unfillable-TP rows (%.2f%%)",
-                 mask.sum(), 100 * mask.mean())
-        df = df.loc[~mask]
-    # INVALID exits are non-trades: degenerate stops (r_ticks 0-1) where no
-    # valid bracket could be placed, so gross_r/net_r are NaN.  pandas .agg()
-    # skips NaN so the SUMS were right, but these rows still landed in the
-    # trade COUNT (438 setups inflated, up to 43 rows each) and, because
-    # NaN > 0 is False, were counted as losses -- diluting win_rate.
-    inv = df["exit_reason"].isna() | (df["exit_reason"] == "INVALID")
-    if inv.any():
-        log.info("  dropping %d INVALID-exit rows (%.3f%%)",
-                 inv.sum(), 100 * inv.mean())
-        df = df.loc[~inv]
-    return df
+    marked = trade_eligibility(df)
+    log.info("  dropping %d ineligible rows", int((~marked["eligible"]).sum()))
+    return marked.loc[marked["eligible"]].copy()
 
 
 def per_setup(df: pd.DataFrame) -> pd.DataFrame:

@@ -42,7 +42,7 @@ import pandas as pd
 _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
-from src.config import DATA_DIR, INSTRUMENTS, OUTPUTS_DIR, SESSIONS
+from src.config import DATA_DIR, INSTRUMENTS, OUTPUTS_DIR, SESSIONS, INVALID_REASONS
 from src.data_layer import _roll_tag
 
 _SPREADS = _ROOT / DATA_DIR / "spreads"
@@ -97,7 +97,7 @@ def main() -> None:
     tl = pd.read_parquet(tl_p, columns=[
         "instrument", "session", "bars_from_open_to_entry", "exit_reason",
     ])
-    tl = tl[tl["exit_reason"] != "INVALID"]
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)]
     print(f"loaded {len(tl):,} valid trades")
     print("NOTE: entry timing comes from the EXISTING trade log, which for")
     print("GC/ZN/6E/6J was built on the broken .c.0 data. Their timing")

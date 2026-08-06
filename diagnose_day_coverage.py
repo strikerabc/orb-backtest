@@ -41,7 +41,7 @@ import pandas as pd
 _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
-from src.config import INSTRUMENTS, MIN_TRADES_FOR_RANKING, OUTPUTS_DIR
+from src.config import INSTRUMENTS, MIN_TRADES_FOR_RANKING, OUTPUTS_DIR, INVALID_REASONS
 
 _OUT = _ROOT / OUTPUTS_DIR
 pd.set_option("display.width", 220)
@@ -66,7 +66,7 @@ def main() -> None:
         "rr", "date", "exit_reason", "realized_vol_14d",
         "range_width_ticks", "gross_r",
     ])
-    tl = tl[tl["exit_reason"] != "INVALID"]
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)]
     print(f"loaded {len(tl):,} valid trades")
 
     # Session-days available per (instrument, session): every distinct date the

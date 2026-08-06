@@ -44,7 +44,7 @@ import pandas as pd
 _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
-from src.config import MIN_TRADES_FOR_RANKING, OUTPUTS_DIR
+from src.config import MIN_TRADES_FOR_RANKING, OUTPUTS_DIR, INVALID_REASONS
 
 _OUT = _ROOT / OUTPUTS_DIR
 pd.set_option("display.width", 200)
@@ -90,7 +90,7 @@ def main() -> None:
     print("Loading trade log (gross_r only)...\n")
 
     tl = pd.read_parquet(tl_p, columns=VARIANT_KEYS + ["gross_r", "exit_reason"])
-    tl = tl[tl["exit_reason"] != "INVALID"]
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)]
 
     def self_p(s: pd.Series) -> float:
         # identical formula to null_p_value(), but the "null pool" is the
