@@ -35,6 +35,7 @@ class EntrySignal:
     sl_bars_back: int
     sl_source: str
     gap_fill: bool       # True if bar opened past trigger level
+    fill_at_bar_close: bool = False
 
 
 def _resample_to_tf(open_min_wall: int, bars_c: np.ndarray,
@@ -49,13 +50,16 @@ def _resample_to_tf(open_min_wall: int, bars_c: np.ndarray,
     bucket  = elapsed // tf                   # which tf-bar each 1m bar belongs to
 
     n_buckets = int(bucket.max()) + 1 if len(bucket) > 0 else 0
-    tf_closes = np.full(n_buckets, np.nan)
     tf_last   = np.full(n_buckets, -1, dtype=np.int32)
-
-    for i, b in enumerate(bucket):
-        b = int(b)
-        tf_closes[b] = bars_c[i]   # last 1m bar in bucket = close of tf-bar
-        tf_last[b]   = i
+    if n_buckets:
+        np.maximum.at(tf_last, bucket.astype(np.intp), np.arange(len(bucket)))
+    tf_closes = np.full(n_buckets, np.nan)
+    present = tf_last >= 0
+    tf_closes[present] = bars_c[tf_last[present]]
+    expected_last = open_min_wall + np.arange(n_buckets) * tf + tf - 1
+    complete = present & (bar_wall_mins[np.maximum(tf_last, 0)] == expected_last)
+    tf_closes[~complete] = np.nan
+    tf_last[~complete] = -1
 
     return tf_closes, tf_last
 
@@ -104,9 +108,9 @@ def detect_entries(sd: SessionDay) -> list[EntrySignal]:
                 babs = active_start + bi            # absolute bar index
                 fill = float(max(rh + tick, o[bi])) if is_long else float(min(rl - tick, o[bi]))
                 sl, slb, sls = (find_swing_low(all_o, all_h, all_l, all_c, babs,
-                                               tick, rl) if is_long else
+                                               tick, rl, entry_price=fill) if is_long else
                                 find_swing_high(all_o, all_h, all_l, all_c, babs,
-                                                tick, rh))
+                                                tick, rh, entry_price=fill))
                 signals.append(EntrySignal(
                     mode="II", closure_tf=1, range_minutes=rm,
                     direction=direction, entry_bar_idx=babs,
@@ -136,17 +140,17 @@ def detect_entries(sd: SessionDay) -> list[EntrySignal]:
                     fill_cc  = float(cc_c[ti_cc])
                     sl, slb, sls = (find_swing_low(all_o, all_h, all_l, all_c,
                                                    max(brk_abs, 0) if brk_abs >= 0 else abs_entry,
-                                                   tick, rl) if is_long else
+                                                   tick, rl, entry_price=fill_cc) if is_long else
                                     find_swing_high(all_o, all_h, all_l, all_c,
                                                     max(brk_abs, 0) if brk_abs >= 0 else abs_entry,
-                                                    tick, rh))
+                                                    tick, rh, entry_price=fill_cc))
                     signals.append(EntrySignal(
                         mode="CC", closure_tf=tf, range_minutes=rm,
                         direction=direction, entry_bar_idx=abs_entry,
                         fill_price=fill_cc, breakout_bar_idx=brk_abs,
                         tap_in_bar_idx=None, boundary=boundary,
                         sl_price=sl, sl_bars_back=slb, sl_source=sls,
-                        gap_fill=False,
+                        gap_fill=False, fill_at_bar_close=True,
                     ))
 
             if brk_abs < 0:
@@ -166,9 +170,11 @@ def detect_entries(sd: SessionDay) -> list[EntrySignal]:
             ti_fill = boundary
 
             sl_ti, slb_ti, sls_ti = (
-                find_swing_low(all_o, all_h, all_l, all_c, brk_abs, tick, rl)
+                find_swing_low(all_o, all_h, all_l, all_c, brk_abs, tick, rl,
+                               entry_price=ti_fill)
                 if is_long else
-                find_swing_high(all_o, all_h, all_l, all_c, brk_abs, tick, rh)
+                find_swing_high(all_o, all_h, all_l, all_c, brk_abs, tick, rh,
+                                entry_price=ti_fill)
             )
             signals.append(EntrySignal(
                 mode="TI", closure_tf=1, range_minutes=rm,
@@ -192,9 +198,11 @@ def detect_entries(sd: SessionDay) -> list[EntrySignal]:
                 rii_fill = (float(max(rh + tick, o[rii_rel])) if is_long
                             else float(min(rl - tick, o[rii_rel])))
                 sl_r, slb_r, sls_r = (
-                    find_swing_low(all_o, all_h, all_l, all_c, brk_abs, tick, rl)
+                    find_swing_low(all_o, all_h, all_l, all_c, brk_abs, tick, rl,
+                                   entry_price=rii_fill)
                     if is_long else
-                    find_swing_high(all_o, all_h, all_l, all_c, brk_abs, tick, rh)
+                    find_swing_high(all_o, all_h, all_l, all_c, brk_abs, tick, rh,
+                                    entry_price=rii_fill)
                 )
                 signals.append(EntrySignal(
                     mode="R-II", closure_tf=1, range_minutes=rm,
@@ -218,19 +226,22 @@ def detect_entries(sd: SessionDay) -> list[EntrySignal]:
                     rcc_ti   = int(np.argmax(rcc_trigger))
                     last1m_r = int(rcc_last[rcc_ti])
                     rcc_abs  = active_start + after_ti + last1m_r
+                    rcc_fill = float(rcc_c[rcc_ti])
                     sl_rc, slb_rc, sls_rc = (
-                        find_swing_low(all_o, all_h, all_l, all_c, brk_abs, tick, rl)
+                        find_swing_low(all_o, all_h, all_l, all_c, brk_abs, tick, rl,
+                                       entry_price=rcc_fill)
                         if is_long else
-                        find_swing_high(all_o, all_h, all_l, all_c, brk_abs, tick, rh)
+                        find_swing_high(all_o, all_h, all_l, all_c, brk_abs, tick, rh,
+                                        entry_price=rcc_fill)
                     )
                     signals.append(EntrySignal(
                         mode="R-CC", closure_tf=tf, range_minutes=rm,
                         direction=direction, entry_bar_idx=rcc_abs,
-                        fill_price=float(rcc_c[rcc_ti]),
+                        fill_price=rcc_fill,
                         breakout_bar_idx=brk_abs,
                         tap_in_bar_idx=ti_abs, boundary=boundary,
                         sl_price=sl_rc, sl_bars_back=slb_rc, sl_source=sls_rc,
-                        gap_fill=False,
+                        gap_fill=False, fill_at_bar_close=True,
                     ))
 
     return signals

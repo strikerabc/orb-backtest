@@ -15,6 +15,8 @@ from src.config import (
     MIN_TRADES_FOR_RANKING, SLIPPAGE_PROVENANCE,
     SLIPPAGE_TICKS_BY_SYMBOL_SESSION,
 )
+from src.contracts import DEFAULT_RT_COMMISSION_USD
+from src.filters import trade_eligibility
 
 
 def _verdict_banner(output_dir: Path) -> list[str]:
@@ -98,6 +100,7 @@ _RANK_COLS = [
     "direction", "rr", "trade_count", "win_rate",
     "expectancy_gross_r", "expectancy_net_r", "profit_factor",
     "max_drawdown_r", "ci_lo_95", "ci_hi_95", "null_p_value",
+    "null_p_broad", "null_p_matched", "p_adj_maxT", "q_fdr", "breadth_pass",
 ]
 
 
@@ -124,6 +127,63 @@ def _safe_write(label: str, fn) -> bool:
         return False
 
 
+def _null_section(summary: pd.DataFrame, output_dir: Path) -> list[str]:
+    if summary.empty or "null_p_broad" not in summary:
+        return []
+    families = summary.drop_duplicates([
+        "instrument", "session", "range_minutes", "entry_mode", "closure_tf", "direction"])
+    divergence = int((
+        np.abs(np.log10(summary["null_p_broad"].clip(lower=1e-12))
+               - np.log10(summary["null_p_matched"].clip(lower=1e-12))) > 1
+    ).sum())
+    exhausted = int(families.loc[families["null_days_exhausted"],
+                                 ["instrument", "session"]].drop_duplicates().shape[0])
+    n_fwer = int(families["p_adj_maxT"].le(0.05).sum()) if "p_adj_maxT" in families else 0
+    n_fdr = int(families["q_fdr"].le(0.10).sum()) if "q_fdr" in families else 0
+    survivors = families["survivor"] if "survivor" in families else pd.Series(False, index=families.index)
+    n_broad = int(survivors.sum())
+
+    plot_name = "null_maxT.png"
+    max_t = summary.attrs.get("maxT_null_distribution")
+    if max_t is not None and len(max_t):
+        try:
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(8, 4.5))
+            ax.hist(max_t, bins=50, color="#4c78a8", alpha=0.85)
+            observed = float(families["t_family_obs"].max())
+            ax.axvline(observed, color="#c43c39", linewidth=2, label="observed best")
+            ax.set(xlabel="maximum family statistic", ylabel="draws")
+            ax.legend()
+            fig.tight_layout()
+            fig.savefig(output_dir / plot_name, dpi=160)
+            plt.close(fig)
+        except Exception as exc:
+            log.warning("Could not write maxT plot: %s", exc)
+
+    return [
+        "---", "## Null Calibration - 1500 Randomised Session-Days", "",
+        "Matched-stop random entry timing, with broad opportunity-day and exact fired-day views.", "",
+        "| | value |", "|---|---|",
+        f"| Null days requested / used | {int(summary['null_days_requested'].max())} / "
+        f"{int(summary['null_days_used'].median())} median |",
+        f"| Days exhausted (short of target) | {exhausted} instrument-sessions |",
+        f"| Effective n (day clusters) | {int(summary['null_effective_n'].median())} median |",
+        f"| Bootstrap resamples | {int(summary['null_bootstrap_k'].max()):,} |",
+        f"| Hypothesis universe | {len(summary):,} variants / {len(families):,} families |",
+        f"| Best family, observed statistic | {families['t_family_obs'].max():.4f} |",
+        f"| FWER hurdle (95th pct null max) | {families['maxT_hurdle_95'].iloc[0]:.4f} |",
+        f"| Best family, maxT-adjusted p | {families['p_adj_maxT'].min():.6f} |",
+        f"| Families at FWER 5% | {n_fwer} |",
+        f"| Families at FDR 10% | {n_fdr} |",
+        f"| Selection-adjusted best statistic | {families['selection_adjusted_best_stat'].iloc[0]:.4f} |",
+        f"| FWER survivors also clearing breadth | {n_broad} |",
+        "",
+        f"Broad and matched p-values differ by more than one order of magnitude for {divergence} variants.",
+        "The day-availability policy is cap-at-available without replacement; shortfalls are explicit above.",
+        "",
+        f"![Joint maxT null distribution]({plot_name})" if (output_dir / plot_name).exists() else "",
+        "",
+    ]
 def write_report(
     summary: pd.DataFrame,
     regime_summary: pd.DataFrame,
@@ -145,10 +205,12 @@ def write_report(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── summary tables (small, most valuable) ──────────────────────────────
+    summary_artifact = summary.copy()
+    summary_artifact.attrs = {}
     _safe_write("summary.parquet",
-                lambda: summary.to_parquet(output_dir / "summary.parquet", index=False))
+                lambda: summary_artifact.to_parquet(output_dir / "summary.parquet", index=False))
     _safe_write("summary.csv",
-                lambda: summary.to_csv(output_dir / "summary.csv", index=False))
+                lambda: summary_artifact.to_csv(output_dir / "summary.csv", index=False))
     _safe_write("regime_summary.parquet",
                 lambda: regime_summary.to_parquet(output_dir / "regime_summary.parquet", index=False))
     _safe_write("regime_summary.csv",
@@ -173,7 +235,8 @@ def write_report(
 
 def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
                     trade_log: pd.DataFrame, output_dir: Path) -> None:
-    valid   = trade_log[trade_log["exit_reason"].isin(["TP", "SL", "TIME"])]
+    marked = trade_eligibility(trade_log)
+    valid = marked[marked["eligible"]]
     n_total = len(valid)
     n_atr   = int(trade_log["atr_exceeds_cap"].sum()) if "atr_exceeds_cap" in trade_log else 0
     n_amb   = int(trade_log["same_bar_ambiguous"].sum()) if "same_bar_ambiguous" in trade_log else 0
@@ -189,6 +252,7 @@ def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
 
     lines = ["# ORB Backtest — Results Summary", ""]
     lines += _verdict_banner(output_dir)
+    lines += _null_section(summary, output_dir)
     lines += [
         f"**Total valid trades:** {n_total:,}  |  "
         f"**ATR-invalidated (flagged):** {n_atr:,}  |  "
@@ -312,7 +376,7 @@ def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
         "- `atr_exceeds_cap` flag marks trades where TP > 2.5 × 4h ATR (simulated anyway; filter in analysis).",
         "- `same_bar_ambiguous` flag: SL and TP both hit within entry bar — SL assumed first (conservative).",
         "- Net R cost model: MEASURED per-(instrument, session) slippage "
-        "+ $2.50/side commission (see config.py). Slippage came from bbo-1m "
+        f"+ ${DEFAULT_RT_COMMISSION_USD:.2f} round-trip commission (see contracts.py). Slippage came from bbo-1m "
         "quotes sampled 2020-06 / 2022-06 / 2024-06, entry-weighted by the "
         "empirical distribution of entry minutes. It is NOT a flat 1 tick: "
         "measured values range from 1.00 (ES, ZN, CL, 6E, 6J) to 53.14 ticks "
@@ -320,8 +384,11 @@ def _write_markdown(summary: pd.DataFrame, regime_summary: pd.DataFrame,
         "- **Measured spread is a FLOOR on execution cost.** It excludes "
         "market impact, and ORB entries cross a book in motion. Net R is "
         "therefore optimistic by an unquantified margin.",
-        "- CI is 95% block-bootstrap (block=5 days). Top performers may be inflated by selection bias.",
-        "- Null calibration p-values show fraction of random-entry runs beating each variant.",
+        "- CI is a 95% bootstrap over contiguous five-session-day blocks.",
+        "- Null days are sampled randomly without replacement and stratified by observed regime mix; the former chronological head-slice was invalid.",
+        "- `null_p_broad` covers the deployment opportunity set; `null_p_matched` uses exactly the days the signal fired.",
+        "- ES/NQ local-vendor data is disabled by default (`USE_LOCAL_DATA=False`); when enabled, source-boundary diagnostics are written to `vendor_boundary_diagnostics.csv`.",
+        "- Same-bar outcomes are reported pessimistically in `gross_r` and optimistically in `gross_r_optimistic`.",
     ]
 
     md_path = output_dir / "report.md"

@@ -59,6 +59,7 @@ from src.data_layer import _compute_enrichment, ensure_daily, ensure_data
 from src.entry_detector import detect_entries
 from src.range_builder import build_session_days
 from src.trade_sim import simulate_trade
+from src.filters import trade_eligibility
 
 logging.basicConfig(level=logging.WARNING, format="%(message)s")
 log = logging.getLogger("orb.holdout")
@@ -150,16 +151,19 @@ def main() -> None:
             for sd in sdays:
                 for es in detect_entries(sd):
                     for tr in simulate_trade(es, sd, RR_LEVELS):
-                        if tr.exit_reason in ("INVALID", None):
-                            continue
-                        if getattr(tr, "tp_unfillable", False):
-                            continue
                         rows.append({
                             "instrument": sym, "session": sess,
                             "range_minutes": es.range_minutes,
                             "entry_mode": es.mode, "closure_tf": es.closure_tf,
                             "direction": es.direction, "rr": tr.rr,
                             "gross_r": tr.gross_r, "net_r": tr.net_r,
+                            "exit_reason": tr.exit_reason,
+                            "tp_unfillable": tr.tp_unfillable,
+                            "tp_ticks": tr.tp_ticks, "r_ticks": tr.r_ticks,
+                            "cost_r": tr.cost_r,
+                            "contract_changed_in_session": sd.contract_changed_in_session,
+                            "contract_changed_since_prev_session": sd.contract_changed_since_prev_session,
+                            "session_bar_completeness": sd.session_bar_completeness,
                         })
         print(f"  {sym}: holdout bars {len(df):,}, "
               f"{df['timestamp'].min().date()} -> {df['timestamp'].max().date()}")
@@ -167,7 +171,8 @@ def main() -> None:
     if not rows:
         print("\n  no holdout trades generated")
         return
-    ho = pd.DataFrame(rows)
+    ho = trade_eligibility(pd.DataFrame(rows))
+    ho = ho[ho["eligible"]].copy()
     print(f"\n  holdout trades simulated: {len(ho):,}")
 
     ho_agg = (ho.groupby(FAMILY + ["rr"], observed=True)

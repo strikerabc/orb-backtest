@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from src.config import OUTPUTS_DIR
+from src.config import OUTPUTS_DIR, INVALID_REASONS
 from src.contracts import pnl_usd, size_hybrid
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -31,7 +31,7 @@ def load() -> pd.DataFrame:
             "exit_reason", "tp_ticks"]
     df = pq.read_table(_OUT / "trade_log.parquet", columns=cols).to_pandas()
     df = df.loc[~df["tp_unfillable"].fillna(False).astype(bool)]
-    df = df[df["exit_reason"].notna() & (df["exit_reason"] != "INVALID")]
+    df = df[~df["exit_reason"].isin(INVALID_REASONS)]
     df = df[df["gross_r"].notna()]
     sym, sess, rm, em, ct, rr = BEST_6E
     df = df[(df.instrument == sym) & (df.session == sess)

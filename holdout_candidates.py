@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from src.config import INSTRUMENTS, OUTPUTS_DIR
+from src.config import INSTRUMENTS, OUTPUTS_DIR, INVALID_REASONS
 from src.data_layer import _compute_enrichment, ensure_daily, ensure_data
 from src.entry_detector import detect_entries
 from src.range_builder import build_session_days
@@ -64,7 +64,7 @@ def resim(syms: list[str]) -> pd.DataFrame:
             for sd in build_session_days(bars, sym, sess):
                 for es in detect_entries(sd):
                     for tr in simulate_trade(es, sd, [0.25, 0.5, 0.75, 1.0, 1.5, 2.0]):
-                        if tr.exit_reason in ("INVALID", None):
+                        if tr.exit_reason in INVALID_REASONS:
                             continue
                         if getattr(tr, "tp_unfillable", False):
                             continue

@@ -27,7 +27,7 @@ from src.config import (
     ATR_ANCHOR_ET, ATR_BAR_MINUTES, ATR_PERIOD,
     DATASET, DOWNLOAD_END, DOWNLOAD_END_BUFFER_DAYS, DOWNLOAD_START,
     EXISTING_DATA_ROOT, SCHEMA_1D, SCHEMA_1M, STYPE,
-    INSTRUMENTS, DATA_DIR,
+    INSTRUMENTS, DATA_DIR, USE_LOCAL_DATA,
 )
 
 log = logging.getLogger("orb.data")
@@ -76,12 +76,15 @@ def _cache_path(sym: str, schema: str) -> Path:
     tag = "1m" if schema == SCHEMA_1M else "1d"
     roll = _roll_tag(sym)
 
-    versioned = _DATA / f"{sym}_{roll}_{tag}.parquet"
+    vendor = ""
+    if schema == SCHEMA_1M and INSTRUMENTS[sym].get("has_local_data", False):
+        vendor = "_mixed" if USE_LOCAL_DATA else "_db"
+    versioned = _DATA / f"{sym}_{roll}{vendor}_{tag}.parquet"
     if versioned.exists():
         return versioned
 
     legacy = _DATA / f"{sym}_{tag}.parquet"
-    if legacy.exists() and roll == "c":
+    if legacy.exists() and roll == "c" and not vendor:
         return legacy
 
     return versioned
@@ -114,7 +117,9 @@ def _load_existing_1m(sym: str) -> pd.DataFrame:
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
     # forward-fill missing contract labels (ES has ~5% null in roll months)
     df["_contract"] = df["_contract"].ffill()
-    df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last")
+    df["_source"] = "local"
+    df = df.sort_values("timestamp", kind="mergesort").drop_duplicates(
+        "timestamp", keep="last")
     log.info("Existing %s: %d bars %s -> %s", sym, len(df),
              df.timestamp.min(), df.timestamp.max())
     return df.reset_index(drop=True)
@@ -155,18 +160,19 @@ def _download_databento(sym: str, start: str, end: str, api_key: str) -> pd.Data
         df = df.rename(columns={"symbol": "_contract"})
     elif "_contract" not in df.columns:
         df["_contract"] = INSTRUMENTS[sym]["continuous_symbol"]
-    return df[wanted + ["_contract"]].copy()
+    df["_source"] = "databento"
+    return df[wanted + ["_contract", "_source"]].copy()
 
 
 def _compute_atr_4h(df: pd.DataFrame, period: int = ATR_PERIOD) -> np.ndarray:
     """
-    4-hour Wilder ATR anchored at 18:00 UTC (≈18:00 ET in EDT season).
+    4-hour Wilder ATR anchored at 18:00 America/New_York.
     Returns an array aligned to df's rows: each bar receives the ATR of the
     most recently COMPLETED 4h bar (shift-1, no lookahead).
     NaN where history is insufficient.
     """
-    anchor_h = ATR_ANCHOR_ET[0]   # 18
-    ts = df["timestamp"]
+    anchor_h = ATR_ANCHOR_ET[0]
+    ts = df["timestamp"].dt.tz_convert("America/New_York")
     ohlc_4h = (
         df.assign(_ts=ts)
         .set_index("_ts")
@@ -189,6 +195,7 @@ def _compute_atr_4h(df: pd.DataFrame, period: int = ATR_PERIOD) -> np.ndarray:
         .rename(columns={"_ts": "timestamp", 0: "atr_4h"})
         .dropna(subset=["atr_4h"])
     )
+    atr_df["timestamp"] = atr_df["timestamp"].dt.tz_convert("UTC")
     merged = pd.merge_asof(
         df[["timestamp"]].sort_values("timestamp"),
         atr_df.sort_values("timestamp"),
@@ -216,12 +223,12 @@ def _compute_enrichment(df_1m: pd.DataFrame, df_1d: pd.DataFrame,
         d["parkinson_vol_14d"] = (
             d["parkinson_var"].rolling(14, min_periods=7).mean()**0.5
             * np.sqrt(252)
-        )
+        ).shift(1)  # no lookahead
         # Realized vol from daily log-returns
         d["log_ret"] = np.log(d["close"] / d["close"].shift(1))
         d["realized_vol_14d"] = (
             d["log_ret"].rolling(14, min_periods=7).std() * np.sqrt(252)
-        )
+        ).shift(1)  # no lookahead
         daily_cols = d[["_date_et", "prev_close", "daily_range_ticks",
                         "parkinson_vol_14d", "realized_vol_14d"]]
     else:
@@ -245,9 +252,26 @@ def _merge_and_cache(sym: str, existing: pd.DataFrame,
     frames = [f for f in [downloaded, existing] if f is not None and len(f) > 0]
     if not frames:
         raise RuntimeError(f"No data available for {sym}.")
-    df = pd.concat(frames, ignore_index=True)
+    normalized = []
+    for source, frame in (("databento", downloaded), ("local", existing)):
+        if frame is None or frame.empty:
+            continue
+        f = frame.copy()
+        f["_source"] = f.get("_source", source)
+        f["_source_priority"] = 2 if source == "databento" else 1
+        normalized.append(f)
+    df = pd.concat(normalized, ignore_index=True)
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    df = df.sort_values("timestamp").drop_duplicates("timestamp", keep="last").reset_index(drop=True)
+    dup = df[df.duplicated("timestamp", keep=False)]
+    if not dup.empty:
+        close_diff = dup.groupby("timestamp")["close"].agg(
+            lambda x: float(np.nanmax(x) - np.nanmin(x)))
+        log.warning("%s source overlap: %d timestamps, mean abs close diff %.6g",
+                    sym, dup["timestamp"].nunique(), close_diff.mean())
+    df = (df.sort_values(["timestamp", "_source_priority"], kind="mergesort")
+            .drop_duplicates("timestamp", keep="last")
+            .drop(columns="_source_priority")
+            .reset_index(drop=True))
     log.info("%s merged: %d bars %s → %s", sym, len(df), df.timestamp.min(), df.timestamp.max())
 
     # ATR
@@ -258,6 +282,38 @@ def _merge_and_cache(sym: str, existing: pd.DataFrame,
     df.to_parquet(path, index=False)
     log.info("Cached %s → %s", sym, path)
     return df
+
+
+def vendor_boundary_diagnostics(df: pd.DataFrame, sym: str,
+                                days_each_side: int = 60) -> pd.DataFrame:
+    """Summarise bar-density and return discontinuities at a source splice."""
+    if "_source" not in df.columns or df["_source"].nunique() < 2:
+        return pd.DataFrame()
+    ordered = df.sort_values("timestamp")
+    transitions = ordered.loc[
+        ordered["_source"].ne(ordered["_source"].shift()), "timestamp"]
+    transitions = transitions.iloc[1:]
+    if transitions.empty:
+        return pd.DataFrame()
+    work = ordered.copy()
+    work["_date_et"] = work["timestamp"].dt.tz_convert("America/New_York").dt.date
+    work["abs_return"] = work["close"].pct_change().abs()
+    daily = (work.groupby("_date_et", observed=True)
+             .agg(bar_count=("close", "size"),
+                  mean_abs_1m_return=("abs_return", "mean"),
+                  zero_volume_fraction=("volume", lambda s: float((s <= 0).mean())),
+                  source=("_source", lambda s: s.mode().iat[0] if not s.mode().empty else "unknown"))
+             .reset_index())
+    rows = []
+    for boundary in transitions:
+        boundary_date = pd.Timestamp(boundary).tz_convert("America/New_York").date()
+        daily["distance"] = daily["_date_et"].map(
+            lambda d: (d - boundary_date).days)
+        around = daily[daily["distance"].abs() <= days_each_side].copy()
+        around.insert(0, "instrument", sym)
+        around.insert(1, "boundary_timestamp", boundary)
+        rows.append(around)
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -277,6 +333,8 @@ def ensure_data(sym: str, api_key: str | None = None) -> pd.DataFrame:
         log.info("Loading %s from cache: %s", sym, cache)
         df = pd.read_parquet(cache)
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        if "_source" not in df.columns:
+            df["_source"] = "unknown"
         return df
 
     if api_key is None:
@@ -286,7 +344,7 @@ def ensure_data(sym: str, api_key: str | None = None) -> pd.DataFrame:
                          "Set DATABENTO_API_KEY env var or pass explicitly.")
 
     instr = INSTRUMENTS[sym]
-    if instr.get("has_local_data", False):
+    if instr.get("has_local_data", False) and USE_LOCAL_DATA:
         # Legacy path: Databento 2019-2022 + local Dukascopy 2023-2026
         existing   = _load_existing_1m(sym)
         downloaded = _download_databento(sym, DOWNLOAD_START, DOWNLOAD_END, api_key)

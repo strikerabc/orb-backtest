@@ -14,7 +14,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from src.config import RANGE_MINUTES, SESSIONS, INSTRUMENTS
+from src.config import (
+    CONTEXT_BARS_BEFORE_OPEN, RANGE_MINUTES, SESSIONS, INSTRUMENTS,
+)
 
 log = logging.getLogger("orb.range")
 
@@ -28,8 +30,8 @@ class SessionDay:
     session: str
     local_date: date          # local calendar date of session open
     local_tz: str
-    # 1-minute bar arrays (numpy, N×4 for OHLC) over active window
-    # active window = range_end through 11:59 bar inclusive
+    # 1-minute bar arrays (numpy, N×4 for OHLC), including context before the
+    # session open and continuing through the 11:59 bar.
     bars_o: np.ndarray
     bars_h: np.ndarray
     bars_l: np.ndarray
@@ -49,6 +51,15 @@ class SessionDay:
     gap_ticks: float
     parkinson_vol_14d: float
     realized_vol_14d: float
+    session_open_idx: int = 0
+    context_bars_available: int = 0
+    session_bar_completeness: float = 1.0
+    contract_changed_in_session: bool = False
+    contract_changed_since_prev_session: bool = False
+    pct_bars_from_local: float = 0.0
+    regime_window: int | None = None
+    bar_sources: np.ndarray | None = None
+    bar_contracts: np.ndarray | None = None
 
 
 def _wall_mins(ts_series: pd.Series, tz: str) -> np.ndarray:
@@ -81,14 +92,15 @@ def build_session_days(
     loc_ts   = df_1m["timestamp"].dt.tz_convert(tz)
     loc_date = loc_ts.dt.date.to_numpy(copy=True)
 
-    # Mask: bars relevant to this session (open_min ≤ wall < exit_min + 1)
-    in_sess = (wall >= open_min) & (wall < exit_min)
+    context_start = max(0, open_min - CONTEXT_BARS_BEFORE_OPEN)
+    in_sess = (wall >= context_start) & (wall < exit_min)
 
     df_sess = df_1m[in_sess].copy()
     df_sess["_wall"]    = wall[in_sess]
     df_sess["_locdate"] = loc_date[in_sess]
 
     days: list[SessionDay] = []
+    previous_contract: object | None = None
 
     for ld, grp in df_sess.groupby("_locdate", sort=True):
         grp = grp.sort_values("timestamp")
@@ -99,8 +111,8 @@ def build_session_days(
             rng_mask = (w >= open_min) & (w < open_min + rm)
             if rng_mask.sum() < rm:   # incomplete range — skip this range size
                 continue
-            rh = float(grp.loc[grp.index[rng_mask], "high"].max())
-            rl = float(grp.loc[grp.index[rng_mask], "low"].min())
+            rh = float(grp["high"].to_numpy()[rng_mask].max())
+            rl = float(grp["low"].to_numpy()[rng_mask].min())
             rh_map[rm] = rh
             rl_map[rm] = rl
             rw_map[rm] = round((rh - rl) / tick)
@@ -108,21 +120,47 @@ def build_session_days(
         if not rh_map:
             continue   # no valid range sizes today
 
-        # Active window: from open_min to exit_min - 1 (11:59) inclusive
-        act_mask  = (w >= open_min) & (w <= exit_min - 1)
+        # Context plus active window. Trim stale context across a material gap.
+        act_mask  = (w >= context_start) & (w <= exit_min - 1)
         act_grp   = grp[act_mask].sort_values("timestamp")
 
         if len(act_grp) == 0:
             continue
 
-        # ATR at session open (first bar's precomputed value)
-        atr_val = float(grp.iloc[0].get("atr_4h", np.nan))
+        in_session_grp = act_grp[act_grp["_wall"] >= open_min]
+        if in_session_grp.empty:
+            continue
+        open_pos = int(np.searchsorted(act_grp["_wall"].to_numpy(), open_min))
+        if open_pos:
+            ts_ns = act_grp["timestamp"].to_numpy("datetime64[ns]").astype("int64")
+            gaps = np.flatnonzero(np.diff(ts_ns[:open_pos + 1]) > 5 * 60 * 1_000_000_000)
+            if len(gaps):
+                act_grp = act_grp.iloc[int(gaps[-1]) + 1:]
+                open_pos = int(np.searchsorted(act_grp["_wall"].to_numpy(), open_min))
+
+        expected_bars = max(1, exit_min - open_min)
+        completeness = min(1.0, len(in_session_grp) / expected_bars)
+
+        # ATR and enrichment at the session open, never from context bars.
+        first_session = in_session_grp.iloc[0]
+        atr_val = float(first_session.get("atr_4h", np.nan))
 
         # Enrichment from first bar's daily-joined columns
-        pc  = float(grp.iloc[0].get("prev_close",        np.nan))
-        gap = float(grp.iloc[0].get("open", np.nan) - pc) / tick if not np.isnan(pc) else np.nan
-        pv  = float(grp.iloc[0].get("parkinson_vol_14d", np.nan))
-        rv  = float(grp.iloc[0].get("realized_vol_14d",  np.nan))
+        pc  = float(first_session.get("prev_close",        np.nan))
+        gap = float(first_session.get("open", np.nan) - pc) / tick if not np.isnan(pc) else np.nan
+        pv  = float(first_session.get("parkinson_vol_14d", np.nan))
+        rv  = float(first_session.get("realized_vol_14d",  np.nan))
+
+        contracts = in_session_grp.get("_contract", pd.Series(dtype=object)).dropna()
+        current_contract = contracts.iloc[0] if len(contracts) else None
+        changed_in = bool(contracts.nunique() > 1)
+        changed_since = bool(
+            previous_contract is not None and current_contract is not None
+            and previous_contract != current_contract)
+        if len(contracts):
+            previous_contract = contracts.iloc[-1]
+        sources = in_session_grp.get("_source", pd.Series(dtype=object))
+        pct_local = float(sources.eq("local").mean()) if len(sources) else 0.0
 
         days.append(SessionDay(
             instrument=sym, session=session_name,
@@ -132,15 +170,23 @@ def build_session_days(
             bars_l=act_grp["low"].to_numpy(copy=True),
             bars_c=act_grp["close"].to_numpy(copy=True),
             bars_v=act_grp["volume"].to_numpy(copy=True),
-            bar_timestamps=act_grp["timestamp"].view("int64").to_numpy(copy=True)
-                           if hasattr(act_grp["timestamp"], 'view')
-                           else act_grp["timestamp"].astype("int64").to_numpy(copy=True),
+            bar_timestamps=act_grp["timestamp"].to_numpy("datetime64[ns]").astype("int64"),
             bar_wall_mins=act_grp["_wall"].to_numpy(copy=True),
             range_highs=rh_map, range_lows=rl_map,
             range_widths_ticks=rw_map,
             atr_4h=atr_val, tick_size=tick,
             prev_close=pc, gap_ticks=gap,
             parkinson_vol_14d=pv, realized_vol_14d=rv,
+            session_open_idx=open_pos,
+            context_bars_available=open_pos,
+            session_bar_completeness=completeness,
+            contract_changed_in_session=changed_in,
+            contract_changed_since_prev_session=changed_since,
+            pct_bars_from_local=pct_local,
+            bar_sources=(act_grp["_source"].to_numpy(copy=True)
+                         if "_source" in act_grp else None),
+            bar_contracts=(act_grp["_contract"].to_numpy(copy=True)
+                          if "_contract" in act_grp else None),
         ))
 
     log.info("%s %s: %d session-days", sym, session_name, len(days))

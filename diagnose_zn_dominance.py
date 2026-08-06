@@ -51,8 +51,9 @@ _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
 from src.config import (
-    COMMISSION_PER_SIDE_USD, INSTRUMENTS, MIN_TRADES_FOR_RANKING, OUTPUTS_DIR,
+    INSTRUMENTS, MIN_TRADES_FOR_RANKING, OUTPUTS_DIR, INVALID_REASONS,
 )
+from src.contracts import DEFAULT_RT_COMMISSION_USD
 from src.trade_sim import slippage_ticks_for
 
 _OUT = _ROOT / OUTPUTS_DIR
@@ -81,7 +82,7 @@ def main() -> None:
 
     cols = VARIANT_KEYS + ["gross_r", "net_r", "r_ticks", "exit_reason"]
     tl = pd.read_parquet(tl_p, columns=cols + ["tp_ticks", "tp_unfillable"])
-    tl = tl[tl["exit_reason"].notna() & (tl["exit_reason"] != "INVALID")].copy()
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)].copy()
     print(f"trade log: {len(tl):,} valid rows")
 
     # ── 1. unfillable rate per instrument ──────────────────────────────────
@@ -182,7 +183,7 @@ def main() -> None:
     zn = tl[tl["instrument"] == "ZN"]
     if not zn.empty:
         tv = INSTRUMENTS["ZN"]["tick_value_usd"]
-        comm = 2.0 * COMMISSION_PER_SIDE_USD / tv
+        comm = DEFAULT_RT_COMMISSION_USD / tv
         print(f"  commission {comm:.3f} ticks + measured slippage "
               f"{slippage_ticks_for('ZN','LDN'):.2f} ticks")
         for mode, gg in zn.groupby("entry_mode", observed=True):

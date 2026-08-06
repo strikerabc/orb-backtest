@@ -29,9 +29,10 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from src.config import COMMISSION_PER_SIDE_USD, OUTPUTS_DIR
+from src.config import OUTPUTS_DIR, INVALID_REASONS
 from src.contracts import (CONTRACTS, comm_ticks, cost_ticks, max_stop_ticks,
-                           pnl_usd, size_hybrid, size_single)
+                           pnl_usd, size_hybrid, size_single,
+                           DEFAULT_RT_COMMISSION_USD)
 from src.sizing import MAX_CONTRACTS, MAX_RISK_USD
 from src.trade_sim import slippage_ticks_for
 
@@ -55,7 +56,7 @@ def load(symbols: list[str] | None = None) -> pd.DataFrame:
     # consumer in the codebase drops them; they must go here too because
     # numpy.sum propagates NaN, and a single such row nulls an entire setup's
     # total (378 poisoned group-rows == 126 setups, from 0.045% of trades).
-    df = df[df["exit_reason"].notna() & (df["exit_reason"] != "INVALID")]
+    df = df[~df["exit_reason"].isin(INVALID_REASONS)]
     df = df[df["gross_r"].notna()]
     if symbols:
         df = df[df["instrument"].isin(symbols)]
@@ -103,7 +104,7 @@ def price_group(d: pd.DataFrame, sym: str, sess: str, mode: str) -> dict:
 
 def main() -> None:
     log.info("sweep commission: $%.2f/side = $%.2f round-trip",
-             COMMISSION_PER_SIDE_USD, 2 * COMMISSION_PER_SIDE_USD)
+             DEFAULT_RT_COMMISSION_USD / 2, DEFAULT_RT_COMMISSION_USD)
     log.info("corrected:        e-mini/standard $3.10 RT, micro $1.40 RT\n")
 
     syms = sorted(CONTRACTS.keys())

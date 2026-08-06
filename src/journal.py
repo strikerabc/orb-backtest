@@ -17,6 +17,7 @@ from src.trade_sim import TradeResult
 from src.range_builder import SessionDay
 from src.regime_sampler import RegimeWindow
 from src.config import SESSIONS
+from src.sizing import contracts_for
 
 
 def _bar_idx_to_utc(sd: SessionDay, idx: int) -> Optional[str]:
@@ -43,18 +44,29 @@ def build_row(
     open_min = oh * 60 + om
     is_long = es.direction == "long"
     opp_boundary = sd.range_lows[es.range_minutes] if is_long else sd.range_highs[es.range_minutes]
+    session_start = int(getattr(sd, "session_open_idx", 0))
+    session_h = all_sd_bars_h[session_start:]
+    session_l = all_sd_bars_l[session_start:]
+    entry_rel = max(0, es.entry_bar_idx - session_start)
 
     # Opposite boundary broken flags
     if is_long:
-        opp_broke_anywhere   = bool(np.any(all_sd_bars_l <= opp_boundary))
-        opp_broke_pre_entry  = bool(np.any(all_sd_bars_l[:es.entry_bar_idx + 1] <= opp_boundary))
+        opp_broke_anywhere   = bool(np.any(session_l <= opp_boundary))
+        opp_broke_pre_entry  = bool(np.any(session_l[:entry_rel + 1] <= opp_boundary))
     else:
-        opp_broke_anywhere   = bool(np.any(all_sd_bars_h >= opp_boundary))
-        opp_broke_pre_entry  = bool(np.any(all_sd_bars_h[:es.entry_bar_idx + 1] >= opp_boundary))
+        opp_broke_anywhere   = bool(np.any(session_h >= opp_boundary))
+        opp_broke_pre_entry  = bool(np.any(session_h[:entry_rel + 1] >= opp_boundary))
 
     # Time from session open to entry (bar count)
     open_bar = int(np.searchsorted(sd.bar_wall_mins, open_min))
     bars_from_open = es.entry_bar_idx - open_bar
+    contracts = int(contracts_for([tr.r_ticks], sd.instrument)[0]) if np.isfinite(tr.r_ticks) else 0
+    entry_source = (str(sd.bar_sources[es.entry_bar_idx])
+                    if sd.bar_sources is not None and es.entry_bar_idx < len(sd.bar_sources)
+                    else "unknown")
+    entry_contract = (str(sd.bar_contracts[es.entry_bar_idx])
+                      if sd.bar_contracts is not None and es.entry_bar_idx < len(sd.bar_contracts)
+                      else None)
 
     # Day of week in LOCAL timezone
     dow = pd.Timestamp(sd.local_date).day_name()
@@ -78,10 +90,13 @@ def build_row(
         "closure_tf":             es.closure_tf,
         "direction":              es.direction,
         "entry_time_utc":         _bar_idx_to_utc(sd, es.entry_bar_idx),
+        "entry_source":            entry_source,
+        "entry_contract":          entry_contract,
         "entry_price":            es.fill_price,
         "breakout_bar_idx":       es.breakout_bar_idx,
         "tap_in_bar_idx":         es.tap_in_bar_idx,
         "gap_fill":               es.gap_fill,
+        "fill_at_bar_close":      es.fill_at_bar_close,
         "bars_from_open_to_entry": bars_from_open,
         # ── stop loss ────────────────────────────────────────────────────
         "sl_price":               tr.sl_price,
@@ -108,12 +123,15 @@ def build_row(
         "bars_held":              tr.bars_held,
         # ── results ──────────────────────────────────────────────────────
         "gross_r":                tr.gross_r,
+        "gross_r_optimistic":     tr.gross_r_optimistic,
         "net_r":                  tr.net_r,
+        "cost_r":                 tr.cost_r,
         "gross_usd":              tr.gross_usd,
         "net_usd":                tr.net_usd,
         "mae_r":                  tr.mae_r,
         "mfe_r":                  tr.mfe_r,
         "same_bar_ambiguous":     tr.same_bar_ambiguous,
+        "contracts":              contracts,
         # ── opposite boundary ────────────────────────────────────────────
         "opp_boundary_broken_session":     opp_broke_anywhere,
         "opp_boundary_broken_pre_entry":   opp_broke_pre_entry,
@@ -122,4 +140,9 @@ def build_row(
         "gap_ticks":              sd.gap_ticks,
         "parkinson_vol_14d":      sd.parkinson_vol_14d,
         "realized_vol_14d":       sd.realized_vol_14d,
+        "context_bars_available": sd.context_bars_available,
+        "session_bar_completeness": sd.session_bar_completeness,
+        "contract_changed_in_session": sd.contract_changed_in_session,
+        "contract_changed_since_prev_session": sd.contract_changed_since_prev_session,
+        "pct_bars_from_local":    sd.pct_bars_from_local,
     }

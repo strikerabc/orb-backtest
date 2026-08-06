@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
-from src.config import OUTPUTS_DIR
+from src.config import OUTPUTS_DIR, INVALID_REASONS
 from src.contracts import pnl_usd, size_hybrid
 from src.data_layer import _compute_enrichment, ensure_daily, ensure_data
 from src.entry_detector import detect_entries
@@ -32,7 +32,7 @@ def load_in_sample(setups: list) -> pd.DataFrame:
             "exit_reason"]
     df = pq.read_table(_OUT / "trade_log.parquet", columns=cols).to_pandas()
     df = df.loc[~df["tp_unfillable"].fillna(False).astype(bool)]
-    df = df[df["exit_reason"].notna() & (df["exit_reason"] != "INVALID")]
+    df = df[~df["exit_reason"].isin(INVALID_REASONS)]
     df = df[df["gross_r"].notna()]
     syms = {s[0] for s in setups}
     df = df[df["instrument"].isin(syms)]
@@ -81,7 +81,7 @@ def simulate_holdout(setups: list) -> pd.DataFrame:
                               and s[2] == es.range_minutes and s[3] == es.mode
                               and s[4] == es.closure_tf}
                     for tr in simulate_trade(es, sd, sorted(rr_set)):
-                        if tr.exit_reason in ("INVALID", None):
+                        if tr.exit_reason in INVALID_REASONS:
                             continue
                         if getattr(tr, "tp_unfillable", False):
                             continue
@@ -184,5 +184,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 

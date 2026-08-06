@@ -42,7 +42,7 @@ sys.path.insert(0, str(_ROOT))
 
 from src.config import (
     BOOTSTRAP_BLOCK_SIZE_DAYS, INSTRUMENTS, MIN_TRADES_FOR_RANKING,
-    OUTPUTS_DIR, SESSIONS,
+    OUTPUTS_DIR, SESSIONS, INVALID_REASONS,
 )
 from src.data_layer import _compute_enrichment, ensure_daily, ensure_data
 from src.null_calibrator import (
@@ -102,7 +102,7 @@ def main() -> None:
     # ── observed r_ticks per family, from the trade log ────────────────────
     tl = pd.read_parquet(_OUT / "trade_log.parquet",
                          columns=FAMILY + ["rr", "r_ticks", "exit_reason"])
-    tl = tl[tl["exit_reason"] != "INVALID"]
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)]
     r_map = {}
     for keys, grp in tl.groupby(FAMILY, observed=True):
         r = grp["r_ticks"].to_numpy(dtype=float)
@@ -165,7 +165,7 @@ def main() -> None:
                     if es is None:
                         continue
                     tr = simulate_trade(es, sd, rr_levels=[rr])
-                    if tr and tr[0].exit_reason not in ("INVALID", None):
+                    if tr and tr[0].exit_reason not in INVALID_REASONS:
                         v = tr[0].gross_r
                         if v is not None and np.isfinite(v):
                             vals.append(float(v))

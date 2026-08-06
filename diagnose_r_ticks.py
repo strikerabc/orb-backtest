@@ -6,7 +6,7 @@ Hypothesis
 ZN dominates the ranked table on GROSS expectancy while every row is deeply
 negative on NET. _round_cost_r() in trade_sim.py charges:
 
-    comm_ticks  = 2 * COMMISSION_PER_SIDE_USD / tick_value_usd
+    comm_ticks  = round_trip_commission_usd / tick_value_usd
     total_ticks = comm_ticks + SLIPPAGE_TICKS_ROUND_TRIP
     cost_r      = total_ticks / r_ticks
 
@@ -38,9 +38,10 @@ _ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 
 from src.config import (
-    COMMISSION_PER_SIDE_USD, INSTRUMENTS, MIN_TRADES_FOR_RANKING,
-    OUTPUTS_DIR, SLIPPAGE_TICKS_ROUND_TRIP,
+    INSTRUMENTS, MIN_TRADES_FOR_RANKING,
+    OUTPUTS_DIR, SLIPPAGE_TICKS_ROUND_TRIP, INVALID_REASONS,
 )
+from src.contracts import DEFAULT_RT_COMMISSION_USD
 
 _OUT = _ROOT / OUTPUTS_DIR
 pd.set_option("display.width", 220)
@@ -65,12 +66,12 @@ def main() -> None:
         "instrument", "session", "rr", "entry_mode", "r_ticks",
         "gross_r", "net_r", "exit_reason",
     ])
-    tl = tl[tl["exit_reason"] != "INVALID"]
+    tl = tl[~tl["exit_reason"].isin(INVALID_REASONS)]
 
     # ── 1. r_ticks distribution per instrument ─────────────────────────────
     hr("1. STOP DISTANCE (r_ticks) PER INSTRUMENT")
     print("cost_r = (2*comm/tick_value + slippage) / r_ticks")
-    print(f"cost model: ${COMMISSION_PER_SIDE_USD}/side, "
+    print(f"cost model: ${DEFAULT_RT_COMMISSION_USD/2:.2f}/side, "
           f"{SLIPPAGE_TICKS_ROUND_TRIP} tick round-trip slippage\n")
 
     rows = []
@@ -80,7 +81,7 @@ def main() -> None:
         if len(rt) == 0:
             continue
         tv = INSTRUMENTS[sym]["tick_value_usd"]
-        comm_ticks = 2.0 * COMMISSION_PER_SIDE_USD / tv
+        comm_ticks = DEFAULT_RT_COMMISSION_USD / tv
         total_ticks = comm_ticks + SLIPPAGE_TICKS_ROUND_TRIP
         med = float(np.median(rt))
         rows.append({

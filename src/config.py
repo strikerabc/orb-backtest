@@ -4,6 +4,8 @@ Edit this file to change any knob without touching algorithm code.
 """
 from __future__ import annotations
 
+import os
+
 # ── Instruments ────────────────────────────────────────────────────────────
 #
 # Per-instrument fields
@@ -199,16 +201,18 @@ RR_LEVELS: list[float] = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0]
 # ── ATR Settings ───────────────────────────────────────────────────────────
 ATR_PERIOD: int    = 14
 ATR_BAR_MINUTES: int = 240            # 4-hour bars
-ATR_ANCHOR_ET: tuple[int,int] = (18, 0)   # 18:00 ET = futures session open
+# Applied after timestamps are converted to New York time, so 18:00 remains
+# the futures-session open through both EST and EDT.
+ATR_ANCHOR_ET: tuple[int, int] = (18, 0)
 ATR_CAP_MULTIPLE: float = 2.5
 
 # ── Swing Detector ─────────────────────────────────────────────────────────
 SWING_MAX_LOOKBACK_BARS: int  = 50    # per variant timeframe, may cross session boundary
 SWING_MIN_SL_TICKS: int       = 4     # minimum stop distance in ticks (floor)
+CONTEXT_BARS_BEFORE_OPEN: int = 60
 
 # ── Cost Model (controllable) ──────────────────────────────────────────────
-# Set COMMISSION_PER_SIDE_USD = 0 and SLIPPAGE_TICKS = 0 for frictionless gross.
-COMMISSION_PER_SIDE_USD: float = 2.50    # per contract per side (one-way)
+# Commission is owned by contracts.py; slippage remains configured here.
 SLIPPAGE_TICKS_ROUND_TRIP: int = 1       # fallback when spread_ticks absent
 # net_r = gross_r - (round_trip_cost_in_R)
 # where round_trip_cost_ticks = slippage_ticks + 2*(commission / tick_value)
@@ -334,6 +338,12 @@ SLIPPAGE_PROVENANCE: dict[str, str] = {
 # dropped -- same convention as atr_exceeds_cap) so they can be filtered.
 MIN_TP_TICKS: float = 1.0
 
+INVALID_REASONS: frozenset[str] = frozenset({
+    "INVALID", "SL_WRONG_SIDE", "DEGENERATE_R", "NO_HOLD_BARS",
+})
+USE_LOCAL_DATA: bool = False
+MIN_SESSION_BAR_COMPLETENESS: float = 0.90
+
 # ── Regime Sampling ────────────────────────────────────────────────────────
 REGIME_SEED: int            = 42
 N_REGIMES: int              = 10
@@ -360,8 +370,12 @@ BOOTSTRAP_BLOCK_SIZE_DAYS: int = 5    # block-bootstrap block length
 # to build a null trade pool, then block-bootstrap that pool at the observed
 # variant's sample size to obtain a distribution of null means.
 N_NULL_DRAWS_PER_DAY: int   = 3    # random entries generated per session-day
-NULL_SAMPLE_DAYS: int       = 500  # session-days sampled per null pool
-NULL_BOOTSTRAP_N: int       = 1000 # resamples when building null-mean dist
+NULL_SAMPLE_DAYS: int       = 1500
+NULL_BOOTSTRAP_N: int       = 20_000
+NULL_DAY_SAMPLING: str      = "random"
+NULL_STRATIFY_BY_WINDOW: bool = True
+NULL_MIN_DAYS: int          = 250
+NULL_MASTER_SEED: int       = 20260806
 
 # ── Reporting ──────────────────────────────────────────────────────────────
 # Minimum trades before a variant may appear in a RANKED table.
@@ -396,7 +410,10 @@ DOWNLOAD_END   = "2022-12-31"
 DOWNLOAD_END_BUFFER_DAYS: int = 2
 
 # Existing cached data (from prior Databento pull, already on disk)
-EXISTING_DATA_ROOT = r"C:\Users\strik\Downloads\Backtesting Kit\DukascopyStudio\data\futures"
+EXISTING_DATA_ROOT = os.environ.get(
+    "ORB_EXISTING_DATA_ROOT",
+    r"C:\Users\strik\Downloads\Backtesting Kit\DukascopyStudio\data\futures",
+)
 
 # Output paths (relative to project root)
 DATA_DIR    = "data"

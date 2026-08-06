@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -49,38 +49,38 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     holdout_cutoff = data_end - pd.DateOffset(months=HOLDOUT_MONTHS)
     eligible_end   = pd.Timestamp(holdout_cutoff).date()
 
-    # Compute segment boundaries
-    total_days = (eligible_end - data_start).days
-    seg_days   = total_days / N_REGIMES
+    first_month = pd.Timestamp(data_start) + pd.offsets.MonthBegin(0)
+    if first_month.date() < data_start:
+        first_month += pd.offsets.MonthBegin(1)
+    eligible_months = len(pd.period_range(first_month, eligible_end, freq="M"))
+    realised_n = min(N_REGIMES, eligible_months // REGIME_WINDOW_MONTHS)
+    if realised_n < N_REGIMES:
+        log.warning("History supports %d non-overlapping windows, requested %d",
+                    realised_n, N_REGIMES)
+    if realised_n == 0:
+        return []
+
+    # Spread spare months almost evenly across the n+1 gaps. Randomly assign
+    # the remainder so placement remains seeded without permitting overlap.
+    spare = eligible_months - realised_n * REGIME_WINDOW_MONTHS
+    gaps = np.full(realised_n + 1, spare // (realised_n + 1), dtype=int)
+    remainder = spare % (realised_n + 1)
+    if remainder:
+        gaps[rng.choice(len(gaps), size=remainder, replace=False)] += 1
 
     windows: list[RegimeWindow] = []
-    window_len_days = REGIME_WINDOW_MONTHS * 30  # approximate, re-aligned below
-
-    for i in range(N_REGIMES):
-        seg_start_days = int(i * seg_days)
-        seg_end_days   = int((i + 1) * seg_days) - window_len_days
-
-        if seg_end_days <= seg_start_days:
-            # Segment too small — fallback to start of segment
-            seg_end_days = seg_start_days
-
-        offset = int(rng.integers(0, max(1, seg_end_days - seg_start_days + 1)))
-        win_start = data_start + timedelta(days=seg_start_days + offset)
-
-        # Align to first day of month
-        win_start = pd.Timestamp(win_start).replace(day=1).date()
-
-        # Advance REGIME_WINDOW_MONTHS months
-        win_end_ts = pd.Timestamp(win_start) + pd.DateOffset(months=REGIME_WINDOW_MONTHS)
-        win_end    = (win_end_ts - pd.DateOffset(days=1)).date()
-
-        # Clamp to eligible range
-        if win_end > eligible_end:
-            win_end   = eligible_end
-            win_start = (pd.Timestamp(win_end) - pd.DateOffset(months=REGIME_WINDOW_MONTHS)
-                         + pd.DateOffset(days=1)).date()
-
+    cursor = first_month + pd.DateOffset(months=int(gaps[0]))
+    for i in range(realised_n):
+        win_start = cursor.date()
+        win_end = (cursor + pd.DateOffset(months=REGIME_WINDOW_MONTHS)
+                   - pd.DateOffset(days=1)).date()
         windows.append(RegimeWindow(index=i, start=win_start, end=win_end))
+        cursor += pd.DateOffset(
+            months=REGIME_WINDOW_MONTHS + int(gaps[i + 1]))
+
+    ordered = sorted(windows, key=lambda w: w.start)
+    if any(a.end >= b.start for a, b in zip(ordered, ordered[1:])):
+        raise AssertionError("Regime windows overlap")
 
     for w in windows:
         log.info("Regime window: %s", w)
