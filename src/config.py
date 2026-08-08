@@ -353,6 +353,21 @@ REGIME_WINDOW_MONTHS: int   = 6
 # temporal spread while remaining random within each segment.
 HOLDOUT_MONTHS: int         = 3   # most-recent N months excluded from all windows
 
+# Pin the holdout boundary to a FIXED date instead of deriving it as
+# (data_end - HOLDOUT_MONTHS). Set to None to restore the sliding behaviour.
+#
+# Why this exists: the sliding cutoff makes the holdout a function of how much
+# data you happen to have loaded, so extending the sample MOVES the out-of-sample
+# slice as a side effect. Extending to 2026-08-08 would have slid the holdout to
+# 2026-05-08 -> 2026-08-08, swallowing the 2026-07-25 -> 2026-08-07 paper-trading
+# period that generated the event-regime hypothesis. The holdout would then contain
+# its own originating observation.
+#
+# Pinned at the boundary the existing holdout_verdict.json was computed against, so
+# the "NO EDGE ESTABLISHED" result remains comparable across the data extension and
+# the newly added May-July 2026 span becomes a second independent OOS window.
+HOLDOUT_PIN_START: str | None = "2026-02-01"
+
 # ── Null Calibrator ────────────────────────────────────────────────────────
 BOOTSTRAP_N: int            = 1000
 BOOTSTRAP_BLOCK_SIZE_DAYS: int = 5    # block-bootstrap block length

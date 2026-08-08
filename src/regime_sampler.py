@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import (
-    HOLDOUT_MONTHS, N_REGIMES, REGIME_SEED,
+    HOLDOUT_MONTHS, HOLDOUT_PIN_START, N_REGIMES, REGIME_SEED,
     REGIME_WINDOW_MONTHS,
 )
 
@@ -45,9 +45,28 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     """
     rng = np.random.default_rng(REGIME_SEED)
 
-    # Exclude holdout from the end
-    holdout_cutoff = data_end - pd.DateOffset(months=HOLDOUT_MONTHS)
-    eligible_end   = pd.Timestamp(holdout_cutoff).date()
+    # Exclude holdout from the end.
+    #
+    # HOLDOUT_PIN_START exists because this cutoff is RELATIVE to data_end, so
+    # extending the sample silently slides the holdout forward. When the data was
+    # extended to 2026-08-08, the sliding cutoff would have moved the holdout to
+    # 2026-05-08 -> 2026-08-08, which SWALLOWS the paper-trading period
+    # (2026-07-25 -> 2026-08-07) that generated the event-regime hypothesis. The
+    # holdout would then contain its own originating observation, re-importing the
+    # circularity EVENT_REGIME_PLAN.md section 1.2 exists to prevent -- and it
+    # would do so invisibly, as a side effect of adding data.
+    #
+    # Pinning keeps the established 2026-02-01 boundary fixed, so the holdout that
+    # produced "NO EDGE ESTABLISHED" stays the same slice of history and the newly
+    # added May-July span becomes a SECOND, independent out-of-sample window.
+    if HOLDOUT_PIN_START is not None:
+        eligible_end = pd.Timestamp(HOLDOUT_PIN_START).date()
+        log.info("Holdout PINNED at %s (data_end=%s); sliding cutoff would have "
+                 "been %s", eligible_end, data_end,
+                 pd.Timestamp(data_end - pd.DateOffset(months=HOLDOUT_MONTHS)).date())
+    else:
+        holdout_cutoff = data_end - pd.DateOffset(months=HOLDOUT_MONTHS)
+        eligible_end   = pd.Timestamp(holdout_cutoff).date()
 
     first_month = pd.Timestamp(data_start) + pd.offsets.MonthBegin(0)
     if first_month.date() < data_start:

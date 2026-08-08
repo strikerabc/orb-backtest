@@ -569,3 +569,139 @@ gate's MDE of 0.067 R was an artefact of testing the **rarest event class availa
 Revised order: T2 in-window speakers for 6E/NY → path-efficiency and vol-profile
 metrics from 1m bars (I3 makes these mandatory, not optional) → `DIFFUSE_IN_PATH`
 test on 6E/NY → widen to `T1 ∪ T2` across all families for the §6.2 headline.
+
+---
+
+## J. Data extension to 2026-08-07, and the 2026-08-07 case study
+
+### J1. The April cutoff was a stale run, not a data limit
+
+The caches already held everything through **2026-07-31/08-02**. `trade_log.parquet`
+stopped at 2026-04-30 because the pipeline run was old. So May → July was already on
+disk and free; only 2026-08-01 → 08-08 had to be bought.
+
+| item | cost |
+|---|---|
+| Aug 1–8 gap, all 10 instruments (1m + 1d) | $0.2355 |
+| ES/NQ May 1 → Aug 8 (see J3) | $0.7035 |
+| **total spent** | **$0.939** of ~$32.14 |
+| avoided by not re-downloading from scratch | ~$17.30 |
+
+All 10 instruments now reach **2026-08-07**. Caches backed up to
+`data/_backup_pre_august/` first; pre-extension outputs pinned and hashed to
+`outputs/_baseline_pre_extension/BASELINE_HASHES.json`, which also closes the B3 gap
+(there was previously no single artifact set for the Phase C gate to be identical to).
+
+### J2. Extending the data would have destroyed the clean holdout — silently
+
+`regime_sampler.select_windows` computed `holdout_cutoff = data_end - HOLDOUT_MONTHS`.
+The holdout was therefore a *function of how much data happened to be loaded*.
+
+Moving `data_end` to 2026-08-07 slides the holdout to **2026-05-07 → 2026-08-07**,
+which **swallows the paper period** (2026-07-25 → 2026-08-07). The holdout would have
+contained the very observation that generated the hypothesis — re-importing the
+circularity §1.2 exists to prevent, as an invisible side effect of adding data. One
+turn after establishing the holdout was clean, adding data would have contaminated it.
+
+Fixed via `HOLDOUT_PIN_START = "2026-02-01"` in `config.py`, honoured in
+`regime_sampler.py`. Verified:
+
+| | fitted windows | last window ends |
+|---|---|---|
+| pinned, `data_end` 2026-04-30 | 10 | 2025-12-31 |
+| pinned, `data_end` 2026-08-07 | 10 | 2025-12-31 — **bit-identical** |
+| **unpinned**, `data_end` 2026-08-07 | 10 | **2026-03-31** — old holdout absorbed |
+
+Net effect: the 2026-02-01 → 04-30 holdout that produced `NO EDGE ESTABLISHED` stays
+fixed and comparable, and **May 1 → Jul 24 becomes a second independent OOS window**
+(~59 trading days, free). Jul 25 → Aug 7 remains observation-origin and is barred
+from confirmatory use.
+
+### J3. A cache-path bug nearly cost $18
+
+ES/NQ carry `has_local_data=True`, so `_cache_path` appends a `_db` vendor tag — but
+the legacy fallback is gated on `not vendor`, leaving the existing
+`ES_1m.parquet`/`NQ_1m.parquet` unreachable. The repo's own preflight (free) reported
+`DOWNLOAD ES, NQ`, i.e. full 7-year pulls at roughly $18 rather than 7-day gaps.
+
+Resolved by aliasing to the resolvable `*_c_db_1m.parquet` names after verifying the
+files are pure Databento (they carry `_contract` and no `_source` — exactly what
+`_download_databento` emits), then gap-filling from May. Cost $0.70 instead of ~$18.
+
+Worth noting the near-miss: the 1d copies I made initially *shadowed* the already-
+extended legacy 1d files — the same "config change appears to work and does nothing"
+failure the `_cache_path` docstring warns about. Removed.
+
+### J4. 2026-08-07 — your account holds up, and my first read was wrong
+
+6E/NY, 5m range. Aggregate metrics across all 1,963 6E/NY sessions:
+
+| metric | Aug 7 | median | pctile |
+|---|---|---|---|
+| path efficiency (full post-range) | 0.0441 | 0.0719 | 31.4 |
+| boundary crossings | 9 | 9 | 48.4 |
+| vol-profile ratio | 0.8364 | 0.7289 | 68.6 |
+| **range width (ticks)** | **19** | **12** | **81.6** |
+| session range (ticks) | 49 | 64 | 29.4 |
+
+Read only that, and the day looks **IMPULSE-like** — ratio below 1.0, crossings dead
+average. I initially read it that way. The segment breakdown says otherwise:
+
+| window | efficiency | travel | ticks/min |
+|---|---|---|---|
+| 09:35–10:00 | **0.273** | 55t | 2.20 |
+| 10:00–11:00 | **0.059** | 119t | 1.98 |
+| 11:00–12:00 | **0.060** | 117t | 1.95 |
+
+Efficiency collapses **4.6×** while the travel rate falls only **11%**. That is not
+impulse decay — decay would collapse *travel*. It is sustained activity going
+nowhere, which is precisely §2.1's `DIFFUSE` signature.
+
+Ranked against all 1,962 comparable sessions on the **10:00–12:00 window alone**:
+
+| metric | Aug 7 | median | pctile |
+|---|---|---|---|
+| path efficiency | 0.0126 | 0.0755 | **9.1** |
+| net displacement | 3 t | 22 t | **6.1** |
+| travel | 239 t | 299 t | 25.0 |
+
+**236 ticks travelled, 3 ticks net, over two hours** — 9th percentile efficiency, and
+travel at a fairly normal 25th percentile. Your description ("initial move expected,
+everything after untradeable, including a short re-entry") matches the measurement:
+the only two directional flips were 09:40 long and 09:56 short, both inside 21 minutes
+of the range closing, after which the tape produced motion without displacement for
+two hours. The onset at the 10:00 boundary is consistent with a ~10:00 ET speech and
+Q&A.
+
+**Caveat I have not resolved:** I did not source Barkin's actual speech and Q&A
+timestamps. The timing signature *fits*, but "efficiency collapsed at 10:00" is not
+evidence it collapsed *because of Barkin* until the calendar entry exists. That is a
+Phase A sourcing task and n=1 regardless — 2026-08-07 is observation-origin data and
+can never confirm the hypothesis. Its legitimate use is metric validation and effect
+sizing.
+
+### J5. Two more plan defects this exposed
+
+**`vol_profile_ratio` cannot discriminate on a mixed-channel day.** §6.3 uses mean
+|1m return| in the final third over the first third. On Aug 7 the first third contains
+the NFP-driven open, so the ratio reads 0.84 — *impulse-like* — on a session whose
+post-10:00 behaviour is textbook diffuse. §6.3 makes this metric the taxonomy
+validator that must run *before* any P&L interpretation, so a metric that inverts on
+mixed days is load-bearing and wrong. **Windowed path efficiency is the real
+discriminator** (9.1 vs 31.4 percentile — the windowed version separates, the
+aggregate does not). Same for crossings: 9 total looks average, but they are
+back-loaded, 2 in the first hour against 4 in the last. Recommend replacing the
+absolute-return ratio with **efficiency by third**, and reporting crossings **per
+window** rather than as a session total.
+
+**`derive_event_regime` cannot represent a multi-channel day.** Aug 7 is
+simultaneously `PRE_OPEN_SHOCK` (NFP 08:30 ET, T1 — and the range came in at the 81.6th
+percentile, exactly the reference-level corruption §2.2 predicts) *and*
+`DIFFUSE_IN_PATH` (Barkin, T2). §4.3's precedence emits one label, so the day is
+classified by whichever fires first and the interaction is lost. That interaction is
+plausibly the whole story here: a range inflated 19 ticks wide by a pre-open shock
+makes the breakout threshold meaningless, and *then* the diffuse tape punishes the
+re-entry. Neither channel alone explains it. Keep the raw channel columns as the test
+inputs (§2.2 already says so) and add an explicit `n_active_channels` / channel-set
+column, or multi-channel days will be silently misattributed in the dose–response
+table.
