@@ -1,0 +1,80 @@
+{
+  "_comment": "Pre-registration for the event-regime conditioning hypothesis (EVENT_REGIME_PLAN.md). Written and committed BEFORE any analysis run. Path note: the plan specified outputs/event_prereg.json, which is gitignored -- committing there is a silent no-op and a pre-registration absent from history has no evidential value. Relocated to tracked prereg/. See EVENT_REGIME_REVIEW.md section A3.",
+
+  "written_utc": "2026-08-08T19:56:50Z",
+  "git_sha": "330a191ee099af4b7d199ab7c946b7e8f37e9fa9",
+  "branch": "hypothesis/event-regime-conditioning",
+
+  "hypothesis": "The ORB continuation edge degrades when a session's price path is governed by gradually revealed macro narrative (pressers, Q&A, testimony) rather than by order-flow continuation from the opening range.",
+
+  "predicted_sign": "contaminated_expectancy < clean_expectancy",
+  "predicted_magnitude_r": 0.05,
+  "predicted_mechanism": [
+    "higher post-breakout reversal rate (tap_in_bar_idx not None)",
+    "lower path efficiency",
+    "degradation steepens with rr"
+  ],
+
+  "primary_test": "day-label permutation, pooled across rankable families, T1+T2, one permutation of the union date axis per draw applied to every family/channel/rr level",
+
+  "originating_families": "UNRESOLVED -- user input required. Must be filled with the two paper-traded models' family keys (instrument, session, range_minutes, entry_mode, closure_tf, direction) before the pooled headline is computed. Those two are excluded from the pooled headline and reported separately as Level 0 (plan sections 1.3 and 6.2).",
+
+  "paper_period_start": "UNRESOLVED -- user input required",
+  "paper_period_end": "UNRESOLVED -- user input required",
+  "overlaps_holdout": null,
+  "holdout_start": "2026-02-01",
+  "data_end": "2026-04-30",
+  "holdout_contamination_note": "Plan section 1.2 requires this be resolved BEFORE writing code. It is not resolved. A paper account running forward through 2026 very likely overlaps the 2026-02-01 holdout, in which case the holdout is contaminated FOR THIS HYPOTHESIS and section 6.5's test is not independent confirmation. Until resolved, all work on this branch is to be read as IN-SAMPLE, per plan section 1.2 option (b). No out-of-sample claim may be made from this branch without first setting these fields.",
+
+  "corrections_to_plan_applied_here": {
+    "pooling_permutation": "Plan section 6.2 Level 1 says shuffle day labels within each family independently. That destroys cross-family correlation (all ~1190 families draw from ~24 instrument-sessions and share calendar days and price paths), producing a null that is far too tight and p-values far too small -- the section 6.1 clustering error committed one level up. Corrected to: one permutation of the union date axis per draw, applied to every family, channel and rr level. Consistent with the plan's own (correct) joint-draw rule for the maxT grid.",
+    "mde_formula": "Plan section 7's MDE uses per-trade counts, treating correlated trades as independent draws. Effective n is distinct contaminated DAYS, not trades; the closed form overstates power by roughly 3-5x. Replaced with MDE = 2.486 * sd(delta_permuted) taken directly from the permutation draws, which encodes the design's correlation structure by construction.",
+    "prereg_path": "outputs/ is gitignored; relocated to tracked prereg/.",
+    "stratification": "Permutation blocks on weekday in addition to volatility tercile. FOMC decisions are Wednesday in essentially every case; free permutation assigns labels to weekdays that cannot occur under the real calendar.",
+    "unit_of_analysis": "Day-level: (instrument, session, date) -> mean net_r pooled across families. Enforces the joint-draw discipline through the data layout so it cannot be violated by accident."
+  },
+
+  "gate_run_on_this_branch": {
+    "name": "FOMC anticipation gate",
+    "status": "PRE-REGISTERED, NOT YET RUN AT TIME OF WRITING",
+    "what_it_is": "A feasibility gate on the cheapest decisive slice: FOMC decision dates only, POST_EXIT_SAME_DAY (anticipation) channel only, day-level, in-sample. Purpose is to decide whether the ~300-row Phase A calendar build is worth a day of manual sourcing.",
+    "what_it_is_not": "It is NOT the test of the hypothesis and its p-value is NOT a finding. ~40 usable event days per instrument-session, one channel, in-sample, with no multiplicity correction across the channel x tier grid. The plan's section 6.2 Level-1 pooled test is what decides the hypothesis. This distinction is recorded BEFORE the run specifically so that a favourable gate result cannot later be promoted to a headline.",
+    "channel": "POST_EXIT_SAME_DAY / ANTICIPATION",
+    "why_this_channel": "Plan section 1.4 identifies it as dominant for NY and LDN: FOMC statement 14:00 ET and presser 14:30 ET fall entirely OUTSIDE the 09:30-12:00 ET window, so the operative mechanism is anticipation, not shock. Every FOMC decision in the sample carries a presser (Powell moved to all-meeting pressers in January 2019), making this the purest DIFFUSE anticipation case available.",
+    "predicted_direction": "mean day-level net_r on FOMC decision dates < mean on clean dates (one-sided)",
+    "primary_statistic": "day-count-weighted mean across instrument-sessions of (mean day net_r | FOMC) - (mean day net_r | clean)",
+    "null": "permutation of FOMC labels over the union date axis, count held fixed, 20000 draws, one permutation per draw applied to all instrument-sessions",
+    "variants_prespecified": [
+      "unstratified",
+      "stratified by weekday",
+      "stratified by weekday x parkinson_vol_14d tercile",
+      "placebo: all event dates shifted +7 calendar days",
+      "placebo: all event dates shifted -7 calendar days",
+      "sensitivity: excluding 2020-03-03 (unscheduled emergency cut, statement ~10:00 ET, INSIDE the NY window -- the only genuine in-path FOMC event in the sample, sitting in the most extreme month in the sample)"
+    ],
+    "mechanism_metrics_available_without_new_pipeline": [
+      "reversal rate (tap_in_bar_idx not None)",
+      "MFE/MAE ratio",
+      "tp_hit_rate by rr level (degradation should steepen with rr)"
+    ],
+    "mechanism_metrics_deferred": [
+      "path efficiency (requires 1m bar re-walk)",
+      "boundary crossings (requires 1m bar re-walk)",
+      "vol-profile shape (requires 1m bar re-walk; plan section 6.3 requires this BEFORE interpreting any P&L result, so it is a Phase A/B prerequisite for the full test, not for this gate)"
+    ],
+    "decision_rule": "This gate does not accept or reject the hypothesis. If the effect is absent AND the day-level MDE shows the gate had power to see the pre-registered 0.05 R, the ~250 additional calendar rows are unlikely to change that and Phase A should not be funded on this channel's account. If the effect is present, or if the MDE shows the gate was underpowered to see 0.05 R, Phase A proceeds -- an underpowered null is uninformative, not evidence of absence.",
+    "eligibility": "src.filters.trade_eligibility, families with >= MIN_TRADES_FOR_RANKING (100) eligible trades, dates strictly before holdout_start"
+  },
+
+  "calendar_provenance": {
+    "file": "data/events/fomc_decisions.csv",
+    "builder": "scripts/build_fomc_calendar.py",
+    "sources": [
+      "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
+      "https://www.federalreserve.gov/monetarypolicy/fomchistorical2019.htm",
+      "https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm"
+    ],
+    "sourcing_note": "Meeting dates fetched from Federal Reserve archives, not recalled from memory, per plan section 3.2. Intraday release convention (statement 14:00 ET, presser 14:30 ET) is the documented post-2013 standard and is flagged verified=True for scheduled meetings; the 2020 unscheduled meetings carry verified=False because their intraday timing was not confirmed against a primary source.",
+    "excluded_deliberately": "Notation votes and Statement on Longer-Run Goals releases (2020-08-27, 2025-08-22) are not rate decisions. 2019-10-04/11 was a repo-operations statement, not a rate decision. 2020-03-15 fell on a Sunday -- no session, drops out naturally. 2020-03-17/18 was cancelled."
+  }
+}

@@ -1,7 +1,11 @@
 # data cache — large parquet files, never commit
-data/
+data/*
 outputs/
 runs/
+
+# ...but the event calendar is a VERSIONED input, not a cache.
+# A p-value computed against a calendar that shifts between runs is not a p-value.
+!data/events/
 
 # credentials — NEVER commit
 .env
@@ -28,3 +32,7 @@ Thumbs.db
 
 # Local implementation review
 IMPROVEMENTS.md
+
+# NOTE: EVENT_REGIME_PLAN.md is deliberately TRACKED on the
+# hypothesis/event-regime-conditioning branch. A pre-registered hypothesis whose
+# specification is not in version control cannot be audited after the fact.
