@@ -1,0 +1,160 @@
+{
+  "_what_this_is": "Feasibility GATE, not a test of the hypothesis. See prereg/event_prereg.json -> gate_run_on_this_branch and EVENT_REGIME_REVIEW.md section E. ~40 event days per instrument-session, one channel, IN-SAMPLE, no multiplicity correction. Its p-value is not a finding.",
+  "git_sha": "cc8df9b49e690a2e9b10071d27bd1a8251cdf794",
+  "prereg": "prereg/event_prereg.json",
+  "n_perm": 20000,
+  "seed": 20260808,
+  "holdout_start": "2026-02-01",
+  "originating_families_excluded": "UNRESOLVED",
+  "universe": {
+    "eligible_rankable_pre_holdout_trades": 2809918,
+    "instrument_sessions": 21,
+    "union_dates": 1542,
+    "fomc_dates_pre_holdout": 55,
+    "fomc_dates_in_axis": 47,
+    "fomc_weekday_mix": {
+      "Wednesday": 44,
+      "Thursday": 2,
+      "Tuesday": 1
+    }
+  },
+  "tests": [
+    {
+      "test": "fomc_anticipation",
+      "stratify": "none",
+      "n_event_dates_in_axis": 47,
+      "n_strata": 1,
+      "observed_delta_net_r": -0.055829,
+      "perm_p_one_sided_degradation": 0.024049,
+      "null_mean": 3.2e-05,
+      "null_sd": 0.028471,
+      "mde_80pct_power": 0.070779,
+      "contaminated_days_per_group_median": 36.0,
+      "contaminated_days_per_group_min": 11.0,
+      "n_draws_finite": 20000
+    },
+    {
+      "test": "fomc_anticipation",
+      "stratify": "weekday",
+      "n_event_dates_in_axis": 47,
+      "n_strata": 5,
+      "observed_delta_net_r": -0.055829,
+      "perm_p_one_sided_degradation": 0.135493,
+      "null_mean": -0.026122,
+      "null_sd": 0.026894,
+      "mde_80pct_power": 0.066858,
+      "contaminated_days_per_group_median": 36.0,
+      "contaminated_days_per_group_min": 11.0,
+      "n_draws_finite": 20000
+    },
+    {
+      "test": "fomc_anticipation",
+      "stratify": "weekday_vol",
+      "n_event_dates_in_axis": 47,
+      "n_strata": 16,
+      "observed_delta_net_r": -0.055829,
+      "perm_p_one_sided_degradation": 0.120844,
+      "null_mean": -0.024674,
+      "null_sd": 0.026845,
+      "mde_80pct_power": 0.066736,
+      "contaminated_days_per_group_median": 36.0,
+      "contaminated_days_per_group_min": 11.0,
+      "n_draws_finite": 20000
+    },
+    {
+      "test": "fomc_anticipation_ex_emergency",
+      "stratify": "weekday",
+      "n_event_dates_in_axis": 46,
+      "n_strata": 5,
+      "observed_delta_net_r": -0.05631,
+      "perm_p_one_sided_degradation": 0.143643,
+      "null_mean": -0.027195,
+      "null_sd": 0.027143,
+      "mde_80pct_power": 0.067477,
+      "contaminated_days_per_group_median": 35.0,
+      "contaminated_days_per_group_min": 10.0,
+      "n_draws_finite": 20000
+    },
+    {
+      "test": "placebo_shift_+7d",
+      "stratify": "weekday",
+      "n_event_dates_in_axis": 43,
+      "n_strata": 5,
+      "observed_delta_net_r": 0.000332,
+      "perm_p_one_sided_degradation": 0.819709,
+      "null_mean": -0.025531,
+      "null_sd": 0.028207,
+      "mde_80pct_power": 0.070122,
+      "contaminated_days_per_group_median": 35.0,
+      "contaminated_days_per_group_min": 9.0,
+      "n_draws_finite": 20000
+    },
+    {
+      "test": "placebo_shift_-7d",
+      "stratify": "weekday",
+      "n_event_dates_in_axis": 47,
+      "n_strata": 5,
+      "observed_delta_net_r": -0.010547,
+      "perm_p_one_sided_degradation": 0.712314,
+      "null_mean": -0.025761,
+      "null_sd": 0.026865,
+      "mde_80pct_power": 0.066787,
+      "contaminated_days_per_group_median": 36.0,
+      "contaminated_days_per_group_min": 9.0,
+      "n_draws_finite": 20000
+    }
+  ],
+  "mechanism": {
+    "exit_reasons_seen": [
+      "sl",
+      "time",
+      "tp"
+    ],
+    "clean": {
+      "n_trades": 2726424,
+      "n_days": 1495,
+      "mean_net_r": -0.091982,
+      "reversal_rate": 0.532322,
+      "mfe_mae_ratio_median": 0.977972,
+      "tp_hit_rate": 0.467172,
+      "tp_hit_rate_by_rr": {
+        "0.25": 0.764906,
+        "0.5": 0.621062,
+        "0.75": 0.513427,
+        "1.0": 0.434784,
+        "1.5": 0.312759,
+        "2.0": 0.231287
+      }
+    },
+    "contaminated": {
+      "n_trades": 83494,
+      "n_days": 47,
+      "mean_net_r": -0.154194,
+      "reversal_rate": 0.531272,
+      "mfe_mae_ratio_median": 0.84,
+      "tp_hit_rate": 0.440439,
+      "tp_hit_rate_by_rr": {
+        "0.25": 0.743732,
+        "0.5": 0.603589,
+        "0.75": 0.489487,
+        "1.0": 0.403602,
+        "1.5": 0.281967,
+        "2.0": 0.205671
+      }
+    },
+    "delta": {
+      "mean_net_r": -0.062212,
+      "reversal_rate": -0.00105,
+      "mfe_mae_ratio_median": -0.137972,
+      "tp_hit_rate": -0.026733
+    },
+    "delta_tp_hit_rate_by_rr": {
+      "0.25": -0.021174,
+      "0.5": -0.017473,
+      "0.75": -0.02394,
+      "1.0": -0.031182,
+      "1.5": -0.030792,
+      "2.0": -0.025616
+    }
+  }
+}

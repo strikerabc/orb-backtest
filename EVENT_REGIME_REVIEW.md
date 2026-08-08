@@ -147,10 +147,13 @@ Sourced from the Fed's own archives, not memory
 ([2019 historical](https://www.federalreserve.gov/monetarypolicy/fomchistorical2019.htm),
 [2020 historical](https://www.federalreserve.gov/monetarypolicy/fomchistorical2020.htm),
 [current calendar](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm)):
-**57 decision dates** fall in 2019-04-01 → 2026-04-30. Of those, **54 are
+**57 decision dates** fall in 2019-04-01 → 2026-04-30. Of those, **55 are
 pre-holdout** (holdout starts 2026-02-01), and after weekends/data gaps you land
 near ~40 usable session-days per instrument-session. That is the entire budget
 for the cleanest channel in the design. Plan accordingly.
+
+*(Measured after the gate ran: 47 of those 55 survive into the traded date axis,
+median 36 contaminated days per instrument-session, min 11. See §H.)*
 
 ### B3. Two artifacts disagree with each other
 
@@ -342,3 +345,115 @@ Neither blocks the gate, which is in-sample by construction.
 
 Recommended order from here: read the gate result → resolve F1/F2 → decide Phase A.
 Fix A1 and A2 before any Phase D code is written, regardless of what the gate says.
+
+---
+
+## H. Gate results
+
+Run at `cc8df9b`, after the pre-registration was committed. Full output in
+`prereg/probe_results.json`. Universe: 2,809,918 eligible pre-holdout trades in
+1,129 rankable families across 21 instrument-sessions, 1,542 union dates, 47 FOMC
+dates in the traded axis (median 36 contaminated days per instrument-session).
+
+| test | stratify | delta net R | null mean | p | MDE |
+|---|---|---|---|---|---|
+| FOMC anticipation | none | **−0.0558** | +0.0000 | **0.024** | 0.071 |
+| FOMC anticipation | weekday | **−0.0558** | −0.0261 | **0.136** | 0.067 |
+| FOMC anticipation | weekday × vol | **−0.0558** | −0.0247 | **0.121** | 0.067 |
+| ex-2020-03-03 | weekday | −0.0563 | −0.0272 | 0.144 | 0.067 |
+| placebo +7d | weekday | +0.0003 | −0.0255 | 0.820 | 0.070 |
+| placebo −7d | weekday | −0.0106 | −0.0258 | 0.712 | 0.067 |
+
+### H1. The direction and magnitude match the pre-registration
+
+Observed **−0.0558 R** against a predicted −0.05 R. Right sign, near-exact
+magnitude, on a channel that was pre-registered before the run. Placebos are
+clean (+0.0003 and −0.0106 against a −0.0255 null centre, p = 0.82 and 0.71), so
+this is not the generic calendar artefact §6.4 and §11 warn about. Dropping the
+2020-03-03 emergency cut moves the delta by 0.0005 — one day is not carrying it.
+
+### H2. Half the apparent effect is Wednesday, not FOMC
+
+This is the substantive result, and it only appears because of correction C1.
+
+Unstratified, p = **0.024**. Blocking the permutation on weekday, p = **0.136**.
+The delta does not move — the *null centre* does, from +0.0000 to **−0.0261**.
+FOMC decisions are 44 of 47 Wednesdays in this sample, and Wednesdays are simply
+worse days: about **47% of the −0.0558** is a weekday effect that the unstratified
+test credits to FOMC.
+
+Run as specified in §6.1 — stratifying on volatility tercile only — this reports
+p ≈ 0.024 and reads as a confirmed pre-registered prediction. It isn't one. The
+±7d placebo would not have caught it either, because shifting by exactly 7 days
+*preserves* weekday by design; that property makes the placebo a good control for
+month-position and a blind spot for weekday.
+
+Worth stating plainly: had the plan been implemented as written, the most likely
+outcome was a false positive on the headline channel, presented with a
+pre-registered direction behind it.
+
+### H3. The gate was underpowered, so this is not a null result
+
+MDE ≈ **0.067 R** at 80% power. That is *above* both the observed 0.0558 and the
+pre-registered 0.05. The gate could not have reliably detected the effect it was
+predicting.
+
+Per the pre-registered decision rule — "an underpowered null is uninformative, not
+evidence of absence" — **Phase A proceeds.** The gate did its job: it says the
+signal is plausibly there at roughly the predicted size, and that resolving it
+needs the wider `T1 ∪ T2` net §7 prescribes. Note this is the honest MDE from the
+permutation draws; §7's per-trade formula would have reported roughly 0.015–0.02
+here and declared the gate comfortably powered.
+
+### H4. One mechanism prediction is falsified
+
+| metric | clean | contaminated | delta | prediction |
+|---|---|---|---|---|
+| reversal rate | 0.5323 | 0.5313 | **−0.0011** | higher — **fails** |
+| MFE/MAE median | 0.9780 | 0.8400 | −0.1380 | lower — holds |
+| TP hit rate | 0.4672 | 0.4404 | −0.0267 | lower — holds |
+
+The reversal rate is flat. §1.3 pre-registered "higher post-breakout reversal rate"
+as the *first* mechanism claim, and it is the one metric the plan called free
+because TI detection already is a reversal detector. It does not show up.
+
+TP-hit degradation depends on how you read §6.3's "concentrated at high rr":
+
+| rr | 0.25 | 0.5 | 0.75 | 1.0 | 1.5 | 2.0 |
+|---|---|---|---|---|---|---|
+| absolute Δ | −0.021 | −0.018 | −0.024 | −0.031 | −0.031 | −0.026 |
+| relative Δ | −2.8% | −2.8% | −4.7% | −7.2% | −9.8% | **−11.1%** |
+
+Absolute deltas are flat-to-humped; relative degradation steepens monotonically.
+The plan did not pre-specify which, so both are reported rather than the flattering
+one. **Fix the metric in the pre-registration before Phase D**, because choosing
+after the fact is exactly the freedom pre-registration is meant to remove.
+
+Net: continuation does fail harder at high rr in relative terms, but it does not
+fail by tapping back into the range more often. That is a real strike against the
+stated mechanism, and it raises the §0/§11 alternative — thin pre-event tape rather
+than narrative-driven reversal. The vol-profile validation (§6.3), which needs 1m
+bars, is now the load-bearing test and should run early in Phase B rather than
+late.
+
+### H5. The thing that matters more than any of the above
+
+Clean-day mean is **−0.0920 R per trade**. Contaminated is −0.1542 R.
+
+Both are firmly negative. The event effect is real in direction and roughly the
+predicted size, and it is a rounding error against the level. Removing every FOMC
+day from the sample leaves a strategy losing ~0.09 R per trade before any event
+conditioning is applied.
+
+§11 predicted this: *"the most likely outcome is that clean-day expectancy is also
+indistinguishable from zero, merely less negative."* The measurement is worse than
+that — clean-day expectancy is not indistinguishable from zero, it is reliably
+negative. **No event filter rescues this strategy.** Phase A is worth funding to
+answer the mechanism question honestly, and it should not be funded on the
+expectation that it recovers the edge.
+
+### H6. Loose end
+
+8 of the 55 pre-holdout FOMC dates are absent from the traded date axis (47
+present). Probably holidays and coverage gaps, but I did not verify it, and 15%
+attrition on the scarcest input is worth ten minutes before Phase A.
