@@ -617,6 +617,27 @@ fixed and comparable, and **May 1 → Jul 24 becomes a second independent OOS wi
 (~59 trading days, free). Jul 25 → Aug 7 remains observation-origin and is barred
 from confirmatory use.
 
+Critically for the Phase C gate, the pin reproduces **what the baseline actually ran**,
+not merely a self-consistent result. The baseline executed unpinned at `data_end`
+2026-05-03 (ES/NQ were the binding constraint); pinned at `data_end` 2026-08-07 gives
+the same 10 windows with the same bounds. So fitted history is unchanged across the
+extension, and any diff in the rebuilt artifacts is attributable to added data rather
+than moved windows.
+
+**Open item.** The rebuild logs `Trade log: 5,289,468 rows` against a baseline of
+5,294,256 — **4,788 fewer (0.09%)** despite strictly more data. Two candidate causes
+were tested and eliminated: fitted windows are identical (above), and the ES/NQ
+`_mixed` vs `_db` caches are bit-identical (2,456,056 and 2,453,542 rows, matching
+timestamps and closes). Remaining candidate is enrichment recomputation — extending a
+cache makes `_merge_and_cache` recompute ATR and `_compute_enrichment` recompute
+rolling stats over the merged frame, which can shift values at boundaries and change
+eligibility at the margin.
+
+Not yet diagnosable: `main.py` writes `trade_log.parquet` inside `write_report`
+(line 190), *after* null calibration (line 182), so the file on disk is still the
+baseline until the run completes. Deferred rather than guessed at. The pinned hashes
+in `prereg/baseline_hashes_pre_extension.json` make the diff exact when it lands.
+
 ### J3. A cache-path bug nearly cost $18
 
 ES/NQ carry `has_local_data=True`, so `_cache_path` appends a `_db` vendor tag — but
@@ -673,12 +694,24 @@ of the range closing, after which the tape produced motion without displacement 
 two hours. The onset at the 10:00 boundary is consistent with a ~10:00 ET speech and
 Q&A.
 
-**Caveat I have not resolved:** I did not source Barkin's actual speech and Q&A
-timestamps. The timing signature *fits*, but "efficiency collapsed at 10:00" is not
-evidence it collapsed *because of Barkin* until the calendar entry exists. That is a
-Phase A sourcing task and n=1 regardless — 2026-08-07 is observation-origin data and
-can never confirm the hypothesis. Its legitimate use is metric validation and effect
-sizing.
+**Partially resolved (sourced).** Reuters copy carrying Barkin quotes is stamped
+**Fri 2026-08-07 09:29 CDT = 10:29 ET**, from a National Association for Business
+Economics video presentation. That is an **upper bound**: he was already speaking by
+10:29 ET. The measured efficiency collapse begins in the 10:00–11:00 block, so the
+two are consistent — and the bound rules out a late-morning start.
+
+The same page's calendar confirms the pre-open shock quantitatively: **NFP released
+08:30 ET, payrolls 57 → −23, unemployment 4.2 → 4.1.** A negative payrolls print is a
+large surprise, which corroborates the `PRE_OPEN_SHOCK` reading independently of the
+range percentile.
+
+**Still unresolved:** the wire timestamp bounds when he *had* spoken by, not when he
+started, and no source distinguishes prepared remarks from Q&A. Your claim is
+specifically about Q&A *answers*, which is the finer-grained event the sources do not
+carry. Your own session notes remain the only record at that resolution.
+
+And n=1 regardless: 2026-08-07 is observation-origin data and can never confirm the
+hypothesis. Its legitimate use is metric validation and effect sizing.
 
 ### J5. Two more plan defects this exposed
 
