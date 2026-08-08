@@ -405,17 +405,18 @@ needs the wider `T1 ∪ T2` net §7 prescribes. Note this is the honest MDE from
 permutation draws; §7's per-trade formula would have reported roughly 0.015–0.02
 here and declared the gate comfortably powered.
 
-### H4. One mechanism prediction is falsified
+### H4. Mechanism metrics — one result retracted, see §I3
 
 | metric | clean | contaminated | delta | prediction |
 |---|---|---|---|---|
-| reversal rate | 0.5323 | 0.5313 | **−0.0011** | higher — **fails** |
+| reversal rate | 0.5323 | 0.5313 | −0.0011 | **metric invalid — see §I3** |
 | MFE/MAE median | 0.9780 | 0.8400 | −0.1380 | lower — holds |
 | TP hit rate | 0.4672 | 0.4404 | −0.0267 | lower — holds |
 
-The reversal rate is flat. §1.3 pre-registered "higher post-breakout reversal rate"
-as the *first* mechanism claim, and it is the one metric the plan called free
-because TI detection already is a reversal detector. It does not show up.
+**The reversal-rate row is withdrawn.** I originally read the flat −0.0011 as
+falsifying §1.3's first mechanism claim. That was wrong twice over: the metric
+does not measure reversal (§I3), and the channel tested is not the one the
+prediction is about (§I2). The prediction is **untested**, not failed.
 
 TP-hit degradation depends on how you read §6.3's "concentrated at high rr":
 
@@ -429,12 +430,10 @@ The plan did not pre-specify which, so both are reported rather than the flatter
 one. **Fix the metric in the pre-registration before Phase D**, because choosing
 after the fact is exactly the freedom pre-registration is meant to remove.
 
-Net: continuation does fail harder at high rr in relative terms, but it does not
-fail by tapping back into the range more often. That is a real strike against the
-stated mechanism, and it raises the §0/§11 alternative — thin pre-event tape rather
-than narrative-driven reversal. The vol-profile validation (§6.3), which needs 1m
-bars, is now the load-bearing test and should run early in Phase B rather than
-late.
+Net: continuation fails harder at high rr in relative terms. Whether it fails *by
+reversing* is unmeasured, because no valid reversal metric exists in the trade log
+yet (§I3). The vol-profile and path-efficiency work (§6.3), which needs 1m bars, is
+therefore load-bearing rather than confirmatory, and should run early in Phase B.
 
 ### H5. The thing that matters more than any of the above
 
@@ -457,3 +456,116 @@ expectation that it recovers the edge.
 8 of the 55 pre-holdout FOMC dates are absent from the traded date axis (47
 present). Probably holidays and coverage gaps, but I did not verify it, and 15%
 attrition on the scarcest input is worth ten minutes before Phase A.
+
+---
+
+## I. Update: §1.2 and §1.3 inputs resolved (2026-08-08)
+
+Paper period **2026-07-25 → 2026-08-07**. Originating setup **EURUSD / NY / 5m /
+CC / 5m / long+short → `6E/NY/5/CC/5/{long,short}`**. Pre-registration amended
+(separate block, own commit); gate re-run with Level 0 split out.
+
+### I1. The holdout is clean — better than §1.2 anticipated
+
+The paper period falls entirely **after** `data_end` 2026-04-30, so it never
+touches the 2026-02-01 holdout. I predicted overlap was near-certain and that was
+wrong.
+
+This is stronger than the plan's best case. §1.2 hoped the hypothesis was generated
+outside the *fitted windows*; it was generated outside the **sample entirely**.
+§6.5's holdout test is genuinely independent for this hypothesis and is now live.
+
+The converse cuts the other way and should be stated: because the paper period sits
+outside the sample, **the backtest cannot test the observation on the data that
+produced it.** Confirming it on its own evidence means extending the dataset past
+2026-04-30. If you do that, flag 2026-07-25 → 2026-08-07 as observation-origin and
+exclude it from confirmatory tests exactly as `originating_families` are — otherwise
+the extension re-imports the circularity §1.2 exists to prevent.
+
+### I2. The gate tested the wrong channel for your mechanism
+
+You describe a speaker talking **while the position is open**, direction switching
+on each macro hint. That is `DIFFUSE_IN_PATH` — the PATH channel. The gate tested
+`ANTICIPATION` (`POST_EXIT_SAME_DAY`), because FOMC 14:00/14:30 ET is outside the
+09:30–12:00 ET window.
+
+So the gate did not test your mechanism, and §2.1 predicts *different* signatures
+for the two channels — suppressed participation and weak follow-through for
+anticipation, sustained vol and repeated direction changes for diffuse. A flat
+reversal result on the anticipation channel says nothing about the diffuse channel.
+
+**Sharper, for the paper window specifically:** FOMC 2026-07-29 falls inside it, but
+the presser runs 14:30–15:30 ET — **2.5 hours after the 12:00 ET NY close.**
+Whatever you watched intraday was not the FOMC presser. In-window candidates are
+10:00 ET releases (ISM, JOLTS, consumer confidence, UMich final — `IMPULSE`, the
+control arm) and regional Fed or other central-bank speakers with mid-morning
+remarks (`T2`/`T3`, `DIFFUSE`). Which of those it was is now the highest-value
+sourcing question in Phase A.
+
+### I3. `tap_in_bar_idx` is not a reversal detector — §6.3 defect
+
+§6.3 lists reversal rate as **free**, on the reasoning that "TI detection *is* a
+reversal detector." Measured across all 5.29M trades:
+
+| entry_mode | n | reversal rate |
+|---|---|---|
+| CC | 1,743,276 | **0.0** |
+| II | 686,874 | **0.0** |
+| R-CC | 1,588,656 | **1.0** |
+| R-II | 617,988 | **1.0** |
+| TI | 657,462 | **1.0** |
+
+Exactly 0 or exactly 1, per mode. `tap_in_bar_idx` is a **deterministic function of
+entry mode**, constant within every family. Pooled across modes it measures
+entry-mode *mix*, not path shape. My reported 0.5339 → 0.5327 was the mode mix
+holding steady across FOMC and non-FOMC days — a mild sanity check that day labels
+aren't correlated with mode, and nothing about reversals.
+
+Consequence for the plan: **the one mechanism metric §6.3 calls free does not
+exist.** Testing reversal needs a genuine path-shape measure from 1m bars —
+boundary crossings or path efficiency, both already specified in §6.3 but both
+requiring the bar re-walk. Budget for it rather than expecting it for nothing.
+
+### I4. Level 0 — your setup shows the effect *reversed*, and cannot resolve it
+
+`6E/NY/5/CC/5/{long,short}`, 8,280 eligible pre-holdout trades, 32 FOMC dates,
+reported apart and never pooled per §6.2.
+
+| stratify | delta net R | null mean | p | MDE |
+|---|---|---|---|---|
+| none | **+0.1160** | −0.0016 | 0.800 | 0.345 |
+| weekday | **+0.1160** | −0.0225 | 0.851 | 0.328 |
+
+Clean −0.0952 R, FOMC-day **+0.0698 R** on 229 trades. The sign is **opposite** the
+pre-registered direction, p = 0.80–0.85.
+
+Do not read that as refutation. MDE is **0.33 R, roughly 6× the effect sought** —
+229 trades in one instrument-session is the most underpowered cut in the file, and
+the sign is almost certainly noise. It is uninformative in both directions.
+
+What it does establish: across seven years and 32 FOMC decision days, **your
+specific setup shows no FOMC-day degradation — nominally the reverse.** That does
+not contradict what you saw over ten days on a different channel. It does mean the
+observation gets no corroboration from its own family's history, which is precisely
+why §6.2 keeps Level 0 out of the headline. The pooled result barely moved when
+these two families were removed (−0.0558 → −0.0559), so the headline was never
+resting on them.
+
+*Also structurally degenerate at Level 0: MFE/MAE median is exactly 1.0000 on clean
+days. Not chased. Suspect the same class of problem as I3 and worth a look before
+these metrics are trusted anywhere.*
+
+### I5. Phase A is rescoped — and it is a power upgrade
+
+§9 builds T1 first, T2 optional. Your mechanism lives in **T2/T3 in-window
+speakers**, so invert it: source in-window speaker events for **6E/NY** first.
+
+This makes the design *stronger*, not weaker. Fed speeches alone exceed **200/year**
+against 8 FOMC decisions, so in-path exposure covers a far larger share of days. The
+gate's MDE of 0.067 R was an artefact of testing the **rarest event class available**
+(47 dates), not a ceiling on the design. `EVENT_TIERS_ACTIVE` already defaults to
+`("T1", "T2")` — that config, dead per C4, becomes load-bearing.
+
+Revised order: T2 in-window speakers for 6E/NY → path-efficiency and vol-profile
+metrics from 1m bars (I3 makes these mandatory, not optional) → `DIFFUSE_IN_PATH`
+test on 6E/NY → widen to `T1 ∪ T2` across all families for the §6.2 headline.

@@ -62,9 +62,14 @@ SEED = 20260808
 DRAW_BATCH = 2_000
 EMERGENCY_DATE = "2020-03-03"   # unscheduled cut, ~10:00 ET -> IN-PATH, not anticipation
 
-# Excluded from the pooled headline per plan sections 1.3 / 6.2 once supplied.
-# UNRESOLVED at time of writing -- see prereg "originating_families".
-ORIGINATING_FAMILIES: list[tuple] = []
+# Excluded from the pooled headline per plan sections 1.3 / 6.2, and reported
+# separately as Level 0. Supplied by the user 2026-08-08: the paper-traded setup
+# was EURUSD -> 6E, NY session, 5m range, CC entry, 5m closure, both directions.
+# "L+S" is two family keys, not one. The observation source cannot confirm itself.
+ORIGINATING_FAMILIES: list[tuple] = [
+    ("6E", "NY", 5, "CC", 5, "long"),
+    ("6E", "NY", 5, "CC", 5, "short"),
+]
 
 NEEDED = [
     "date", "instrument", "session", "range_minutes", "entry_mode", "closure_tf",
@@ -80,7 +85,8 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def load_eligible() -> pd.DataFrame:
+def load_eligible() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return (pooled, level0). Level 0 = originating families, never pooled."""
     log("loading trade log ...")
     df = pd.read_parquet(TRADE_LOG, columns=NEEDED)
     log(f"  {len(df):,} rows")
@@ -95,20 +101,21 @@ def load_eligible() -> pd.DataFrame:
     log(f"  {len(df):,} in {len(keep):,} rankable families "
         f"(>= {MIN_TRADES_FOR_RANKING} eligible trades)")
 
-    if ORIGINATING_FAMILIES:
-        before = len(df)
-        mask = pd.Series(False, index=df.index)
-        for fam in ORIGINATING_FAMILIES:
-            m = pd.Series(True, index=df.index)
-            for col, val in zip(POOL_KEYS, fam):
-                m &= df[col] == val
-            mask |= m
-        df = df[~mask].copy()
-        log(f"  dropped {before - len(df):,} rows from originating families")
+    mask = pd.Series(False, index=df.index)
+    for fam in ORIGINATING_FAMILIES:
+        m = pd.Series(True, index=df.index)
+        for col, val in zip(POOL_KEYS, fam):
+            m &= df[col] == val
+        mask |= m
+    level0 = df[mask].copy()
+    df = df[~mask].copy()
+    log(f"  {len(level0):,} rows in {len(ORIGINATING_FAMILIES)} originating "
+        f"families (Level 0, reported separately, NEVER pooled)")
 
     df = df[df["date"] < HOLDOUT_START].copy()
-    log(f"  {len(df):,} pre-holdout (date < {HOLDOUT_START})")
-    return df
+    level0 = level0[level0["date"] < HOLDOUT_START].copy()
+    log(f"  {len(df):,} pooled pre-holdout (date < {HOLDOUT_START})")
+    return df, level0
 
 
 def load_fomc_dates() -> list[str]:
@@ -317,7 +324,7 @@ def main() -> None:
     except Exception:
         sha = "unknown"
 
-    df = load_eligible()
+    df, level0 = load_eligible()
     fomc = load_fomc_dates()
     log(f"FOMC decision dates pre-holdout: {len(fomc)}")
 
@@ -351,6 +358,24 @@ def main() -> None:
             f"placebo_shift_{shift:+d}d", placebo, dates, groups, vals, present,
             date_vol, date_weekday, "weekday", np.random.default_rng(SEED + 2)))
 
+    # Level 0 -- the originating families, run on their own. Plan sections 1.3/6.2:
+    # the observation source cannot be its own confirmation, so this is reported
+    # apart and never pooled. If the effect lives ONLY here, it is noise.
+    log("running Level 0 [originating families, NOT pooled] ...")
+    level0_results: list[dict] = []
+    level0_mech: dict = {}
+    if len(level0):
+        p0 = build_day_panel(level0)
+        d0, g0, v0, pr0, dv0, dw0 = make_matrices(p0)
+        axis0 = sorted(set(fomc_in_axis) & set(d0.tolist()))
+        for scheme in ("none", "weekday"):
+            level0_results.append(run_test(
+                "LEVEL0_originating_fomc_anticipation", set(axis0), d0, g0, v0, pr0,
+                dv0, dw0, scheme, np.random.default_rng(SEED + 3)))
+        level0_mech = mechanism(level0, set(axis0))
+        log(f"  Level 0: {len(level0):,} trades, {len(g0)} group(s), "
+            f"{len(axis0)} FOMC dates in axis")
+
     log("computing mechanism metrics ...")
     mech = mechanism(df, set(fomc_in_axis))
 
@@ -376,6 +401,18 @@ def main() -> None:
         },
         "tests": results,
         "mechanism": mech,
+        "level0_originating_families": {
+            "_note": "The two paper-traded families (6E/NY/5/CC/5 long and short). "
+                     "Reported apart and NEVER pooled into the headline, per plan "
+                     "sections 1.3 and 6.2 -- the observation source cannot confirm "
+                     "itself. If the effect appears only here, it is noise. Single "
+                     "instrument-session, so the day axis is one group and this is "
+                     "the most underpowered cut in the file.",
+            "families": [list(f) for f in ORIGINATING_FAMILIES],
+            "n_trades": int(len(level0)),
+            "tests": level0_results,
+            "mechanism": level0_mech,
+        },
     }
     OUT_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     log(f"\nwrote {OUT_JSON}\n")

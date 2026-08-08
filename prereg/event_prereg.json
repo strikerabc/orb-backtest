@@ -66,6 +66,24 @@
     "eligibility": "src.filters.trade_eligibility, families with >= MIN_TRADES_FOR_RANKING (100) eligible trades, dates strictly before holdout_start"
   },
 
+  "amendment_2026_08_08_resolving_prereg_unknowns": {
+    "_status": "Amendment, not revision. Fills two fields declared UNRESOLVED above and pending user input. No prediction, decision rule, statistic or channel definition is altered. Recorded as a separate block with its own commit so the diff shows exactly what changed and when.",
+    "written_utc": "2026-08-08T20:41:00Z",
+    "resolved_paper_period_start": "2026-07-25",
+    "resolved_paper_period_end": "2026-08-07",
+    "resolved_overlaps_holdout": false,
+    "holdout_status": "CLEAN. The paper period (2026-07-25 -> 2026-08-07) falls entirely AFTER data_end 2026-04-30, so it does not touch the 2026-02-01 holdout. This is a stronger provenance position than plan section 1.2 anticipated: the hypothesis was generated on data wholly disjoint from the backtest sample, not merely outside the fitted windows. Section 6.5's holdout test is therefore genuinely independent for this hypothesis and is LIVE.",
+    "holdout_caveat": "The converse also holds and cuts the other way: because the paper period lies outside the sample entirely, the backtest cannot test the observation on the data that produced it. Confirming it on its own evidence requires extending the dataset past 2026-04-30. If that extension is made, 2026-07-25 -> 2026-08-07 must be flagged as observation-origin and excluded from confirmatory tests, exactly as originating_families are -- otherwise the extension re-imports the circularity section 1.2 exists to prevent.",
+    "resolved_originating_families": [
+      ["6E", "NY", 5, "CC", 5, "long"],
+      ["6E", "NY", 5, "CC", 5, "short"]
+    ],
+    "originating_families_note": "User-supplied: EURUSD -> 6E, NY session, 5m range, CC entry, 5m closure, longs and shorts. 'L+S' is two family keys. Both verified present and rankable in the trade log (5,724 and 5,994 eligible trades; raw expectancy -0.1558 R and -0.1654 R, both worse than the pooled clean-day mean of -0.0920 R). Excluded from the pooled headline and reported as Level 0 per sections 1.3 and 6.2.",
+    "channel_mismatch_identified": "The user's described mechanism is a speaker talking WHILE the position is open, with direction switching on each macro hint. That is DIFFUSE_IN_PATH (plan section 2.2 PATH channel), not ANTICIPATION. The gate on this branch tested ANTICIPATION (POST_EXIT_SAME_DAY), because the FOMC statement 14:00 ET and presser 14:30 ET fall outside the 09:30-12:00 ET NY window. The gate therefore did not test the user's mechanism. Section 2.1 predicts DIFFERENT signatures for the two channels -- suppressed participation and weak follow-through for ANTICIPATION, sustained elevated vol and repeated direction changes for DIFFUSE -- so a flat reversal result on the anticipation channel is not evidence about the diffuse channel.",
+    "specific_consequence_for_paper_window": "FOMC 2026-07-28/29 falls inside the paper period, decision 2026-07-29. But the presser runs 14:30-15:30 ET, which is 2.5 hours AFTER the 12:00 ET NY close. Whatever was observed intraday in NY 09:30-12:00 was therefore NOT the FOMC presser. Candidates that ARE in-window: 10:00 ET releases (ISM, JOLTS, consumer confidence, UMich final -- IMPULSE geometry, the control arm) and regional Fed / other central-bank speakers with mid-morning remarks (T2/T3, DIFFUSE). Identifying which is a Phase A sourcing task and is now the highest-value one.",
+    "phase_a_rescope": "Plan section 9 Phase A builds T1 first and treats T2 as an optional extension. The user's mechanism lives in T2/T3 in-window speakers, so that order is now inverted for the sharpest test: source in-window speaker events for 6E/NY first. This is a POWER UPGRADE, not a setback -- Fed speeches alone exceed 200/year against 8 FOMC decisions, so in-path exposure covers a far larger fraction of days. The gate's MDE of 0.067 R was an artefact of testing the rarest event class available (47 dates), not a ceiling on the design."
+  },
+
   "calendar_provenance": {
     "file": "data/events/fomc_decisions.csv",
     "builder": "scripts/build_fomc_calendar.py",

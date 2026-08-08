@@ -1,13 +1,30 @@
 {
   "_what_this_is": "Feasibility GATE, not a test of the hypothesis. See prereg/event_prereg.json -> gate_run_on_this_branch and EVENT_REGIME_REVIEW.md section E. ~40 event days per instrument-session, one channel, IN-SAMPLE, no multiplicity correction. Its p-value is not a finding.",
-  "git_sha": "cc8df9b49e690a2e9b10071d27bd1a8251cdf794",
+  "git_sha": "9d4c1b9be56332e8a4f59696b081db86c89854ff",
   "prereg": "prereg/event_prereg.json",
   "n_perm": 20000,
   "seed": 20260808,
   "holdout_start": "2026-02-01",
-  "originating_families_excluded": "UNRESOLVED",
+  "originating_families_excluded": [
+    [
+      "6E",
+      "NY",
+      5,
+      "CC",
+      5,
+      "long"
+    ],
+    [
+      "6E",
+      "NY",
+      5,
+      "CC",
+      5,
+      "short"
+    ]
+  ],
   "universe": {
-    "eligible_rankable_pre_holdout_trades": 2809918,
+    "eligible_rankable_pre_holdout_trades": 2801638,
     "instrument_sessions": 21,
     "union_dates": 1542,
     "fomc_dates_pre_holdout": 55,
@@ -24,11 +41,11 @@
       "stratify": "none",
       "n_event_dates_in_axis": 47,
       "n_strata": 1,
-      "observed_delta_net_r": -0.055829,
-      "perm_p_one_sided_degradation": 0.024049,
-      "null_mean": 3.2e-05,
-      "null_sd": 0.028471,
-      "mde_80pct_power": 0.070779,
+      "observed_delta_net_r": -0.055913,
+      "perm_p_one_sided_degradation": 0.023699,
+      "null_mean": 3e-05,
+      "null_sd": 0.028436,
+      "mde_80pct_power": 0.070692,
       "contaminated_days_per_group_median": 36.0,
       "contaminated_days_per_group_min": 11.0,
       "n_draws_finite": 20000
@@ -38,11 +55,11 @@
       "stratify": "weekday",
       "n_event_dates_in_axis": 47,
       "n_strata": 5,
-      "observed_delta_net_r": -0.055829,
-      "perm_p_one_sided_degradation": 0.135493,
-      "null_mean": -0.026122,
-      "null_sd": 0.026894,
-      "mde_80pct_power": 0.066858,
+      "observed_delta_net_r": -0.055913,
+      "perm_p_one_sided_degradation": 0.133593,
+      "null_mean": -0.025999,
+      "null_sd": 0.026841,
+      "mde_80pct_power": 0.066727,
       "contaminated_days_per_group_median": 36.0,
       "contaminated_days_per_group_min": 11.0,
       "n_draws_finite": 20000
@@ -52,11 +69,11 @@
       "stratify": "weekday_vol",
       "n_event_dates_in_axis": 47,
       "n_strata": 16,
-      "observed_delta_net_r": -0.055829,
-      "perm_p_one_sided_degradation": 0.120844,
-      "null_mean": -0.024674,
-      "null_sd": 0.026845,
-      "mde_80pct_power": 0.066736,
+      "observed_delta_net_r": -0.055913,
+      "perm_p_one_sided_degradation": 0.118394,
+      "null_mean": -0.024551,
+      "null_sd": 0.026792,
+      "mde_80pct_power": 0.066605,
       "contaminated_days_per_group_median": 36.0,
       "contaminated_days_per_group_min": 11.0,
       "n_draws_finite": 20000
@@ -66,11 +83,11 @@
       "stratify": "weekday",
       "n_event_dates_in_axis": 46,
       "n_strata": 5,
-      "observed_delta_net_r": -0.05631,
-      "perm_p_one_sided_degradation": 0.143643,
-      "null_mean": -0.027195,
-      "null_sd": 0.027143,
-      "mde_80pct_power": 0.067477,
+      "observed_delta_net_r": -0.056482,
+      "perm_p_one_sided_degradation": 0.141393,
+      "null_mean": -0.027077,
+      "null_sd": 0.027098,
+      "mde_80pct_power": 0.067365,
       "contaminated_days_per_group_median": 35.0,
       "contaminated_days_per_group_min": 10.0,
       "n_draws_finite": 20000
@@ -80,11 +97,11 @@
       "stratify": "weekday",
       "n_event_dates_in_axis": 43,
       "n_strata": 5,
-      "observed_delta_net_r": 0.000332,
-      "perm_p_one_sided_degradation": 0.819709,
-      "null_mean": -0.025531,
-      "null_sd": 0.028207,
-      "mde_80pct_power": 0.070122,
+      "observed_delta_net_r": 0.00042,
+      "perm_p_one_sided_degradation": 0.820059,
+      "null_mean": -0.025421,
+      "null_sd": 0.028154,
+      "mde_80pct_power": 0.069991,
       "contaminated_days_per_group_median": 35.0,
       "contaminated_days_per_group_min": 9.0,
       "n_draws_finite": 20000
@@ -94,11 +111,11 @@
       "stratify": "weekday",
       "n_event_dates_in_axis": 47,
       "n_strata": 5,
-      "observed_delta_net_r": -0.010547,
-      "perm_p_one_sided_degradation": 0.712314,
-      "null_mean": -0.025761,
-      "null_sd": 0.026865,
-      "mde_80pct_power": 0.066787,
+      "observed_delta_net_r": -0.010386,
+      "perm_p_one_sided_degradation": 0.713164,
+      "null_mean": -0.025647,
+      "null_sd": 0.026814,
+      "mde_80pct_power": 0.06666,
       "contaminated_days_per_group_median": 36.0,
       "contaminated_days_per_group_min": 9.0,
       "n_draws_finite": 20000
@@ -111,50 +128,155 @@
       "tp"
     ],
     "clean": {
-      "n_trades": 2726424,
+      "n_trades": 2718373,
       "n_days": 1495,
-      "mean_net_r": -0.091982,
-      "reversal_rate": 0.532322,
-      "mfe_mae_ratio_median": 0.977972,
-      "tp_hit_rate": 0.467172,
+      "mean_net_r": -0.091972,
+      "reversal_rate": 0.533898,
+      "mfe_mae_ratio_median": 0.977814,
+      "tp_hit_rate": 0.46717,
       "tp_hit_rate_by_rr": {
-        "0.25": 0.764906,
-        "0.5": 0.621062,
-        "0.75": 0.513427,
-        "1.0": 0.434784,
-        "1.5": 0.312759,
-        "2.0": 0.231287
+        "0.25": 0.764898,
+        "0.5": 0.62104,
+        "0.75": 0.513389,
+        "1.0": 0.434746,
+        "1.5": 0.312736,
+        "2.0": 0.231279
       }
     },
     "contaminated": {
-      "n_trades": 83494,
+      "n_trades": 83265,
       "n_days": 47,
-      "mean_net_r": -0.154194,
-      "reversal_rate": 0.531272,
-      "mfe_mae_ratio_median": 0.84,
-      "tp_hit_rate": 0.440439,
+      "mean_net_r": -0.15481,
+      "reversal_rate": 0.532733,
+      "mfe_mae_ratio_median": 0.836541,
+      "tp_hit_rate": 0.440113,
       "tp_hit_rate_by_rr": {
-        "0.25": 0.743732,
-        "0.5": 0.603589,
-        "0.75": 0.489487,
-        "1.0": 0.403602,
-        "1.5": 0.281967,
-        "2.0": 0.205671
+        "0.25": 0.743553,
+        "0.5": 0.603063,
+        "0.75": 0.489113,
+        "1.0": 0.403256,
+        "1.5": 0.281681,
+        "2.0": 0.205234
       }
     },
     "delta": {
-      "mean_net_r": -0.062212,
-      "reversal_rate": -0.00105,
-      "mfe_mae_ratio_median": -0.137972,
-      "tp_hit_rate": -0.026733
+      "mean_net_r": -0.062838,
+      "reversal_rate": -0.001165,
+      "mfe_mae_ratio_median": -0.141273,
+      "tp_hit_rate": -0.027057
     },
     "delta_tp_hit_rate_by_rr": {
-      "0.25": -0.021174,
-      "0.5": -0.017473,
-      "0.75": -0.02394,
-      "1.0": -0.031182,
-      "1.5": -0.030792,
-      "2.0": -0.025616
+      "0.25": -0.021345,
+      "0.5": -0.017977,
+      "0.75": -0.024276,
+      "1.0": -0.03149,
+      "1.5": -0.031055,
+      "2.0": -0.026045
+    }
+  },
+  "level0_originating_families": {
+    "_note": "The two paper-traded families (6E/NY/5/CC/5 long and short). Reported apart and NEVER pooled into the headline, per plan sections 1.3 and 6.2 -- the observation source cannot confirm itself. If the effect appears only here, it is noise. Single instrument-session, so the day axis is one group and this is the most underpowered cut in the file.",
+    "families": [
+      [
+        "6E",
+        "NY",
+        5,
+        "CC",
+        5,
+        "long"
+      ],
+      [
+        "6E",
+        "NY",
+        5,
+        "CC",
+        5,
+        "short"
+      ]
+    ],
+    "n_trades": 8280,
+    "tests": [
+      {
+        "test": "LEVEL0_originating_fomc_anticipation",
+        "stratify": "none",
+        "n_event_dates_in_axis": 32,
+        "n_strata": 1,
+        "observed_delta_net_r": 0.116026,
+        "perm_p_one_sided_degradation": 0.80021,
+        "null_mean": -0.001561,
+        "null_sd": 0.138696,
+        "mde_80pct_power": 0.344798,
+        "contaminated_days_per_group_median": 32.0,
+        "contaminated_days_per_group_min": 32.0,
+        "n_draws_finite": 20000
+      },
+      {
+        "test": "LEVEL0_originating_fomc_anticipation",
+        "stratify": "weekday",
+        "n_event_dates_in_axis": 32,
+        "n_strata": 5,
+        "observed_delta_net_r": 0.116026,
+        "perm_p_one_sided_degradation": 0.850857,
+        "null_mean": -0.022489,
+        "null_sd": 0.132029,
+        "mde_80pct_power": 0.328225,
+        "contaminated_days_per_group_median": 32.0,
+        "contaminated_days_per_group_min": 32.0,
+        "n_draws_finite": 20000
+      }
+    ],
+    "mechanism": {
+      "exit_reasons_seen": [
+        "sl",
+        "time",
+        "tp"
+      ],
+      "clean": {
+        "n_trades": 8051,
+        "n_days": 1046,
+        "mean_net_r": -0.095167,
+        "reversal_rate": 0.0,
+        "mfe_mae_ratio_median": 1.0,
+        "tp_hit_rate": 0.468016,
+        "tp_hit_rate_by_rr": {
+          "0.25": 0.768265,
+          "0.5": 0.628571,
+          "0.75": 0.526132,
+          "1.0": 0.447387,
+          "1.5": 0.320557,
+          "2.0": 0.234146
+        }
+      },
+      "contaminated": {
+        "n_trades": 229,
+        "n_days": 32,
+        "mean_net_r": 0.069785,
+        "reversal_rate": 0.0,
+        "mfe_mae_ratio_median": 1.374948,
+        "tp_hit_rate": 0.558952,
+        "tp_hit_rate_by_rr": {
+          "0.25": 0.842105,
+          "0.5": 0.785714,
+          "0.75": 0.619048,
+          "1.0": 0.52381,
+          "1.5": 0.380952,
+          "2.0": 0.357143
+        }
+      },
+      "delta": {
+        "mean_net_r": 0.164952,
+        "reversal_rate": 0.0,
+        "mfe_mae_ratio_median": 0.374948,
+        "tp_hit_rate": 0.090936
+      },
+      "delta_tp_hit_rate_by_rr": {
+        "0.25": 0.07384,
+        "0.5": 0.157143,
+        "0.75": 0.092916,
+        "1.0": 0.076423,
+        "1.5": 0.060395,
+        "2.0": 0.122997
+      }
     }
   }
 }
