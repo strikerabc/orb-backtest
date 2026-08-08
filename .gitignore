@@ -12,6 +12,7 @@ runs/
 *.env
 secrets.py
 *_api_key*
+databento_key.txt
 
 # Python
 __pycache__/
