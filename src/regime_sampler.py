@@ -72,21 +72,36 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     if first_month.date() < data_start:
         first_month += pd.offsets.MonthBegin(1)
 
-    # Count only months that end STRICTLY BEFORE eligible_end.
+    # Count only months whose LAST DAY falls strictly before eligible_end.
     #
     # The previous form was len(period_range(first_month, eligible_end, freq="M")),
-    # which counts the boundary month as fully usable. With eligible_end
-    # 2026-02-01 that credited all of February, so ETH -- data_start 2021-02-08,
-    # exactly 10 windows in 61 counted months, zero slack -- placed W9 at
-    # 2025-09-01 -> 2026-02-28, crossing the holdout boundary by 27 days and
-    # putting 6,168 fitted trades inside the holdout region.
+    # which counts the BOUNDARY MONTH as fully usable even though only its first
+    # day(s) are. Window ends are start + REGIME_WINDOW_MONTHS - 1 day and were
+    # never clamped against eligible_end, and the only post-hoc check was for
+    # mutual overlap -- so when the arithmetic leaves no spare months the final
+    # window ran past the holdout boundary and fitted-window trades leaked into the
+    # out-of-sample region.
     #
-    # Window ends are start + REGIME_WINDOW_MONTHS - 1 day and were never clamped
-    # against eligible_end, and the only post-hoc check was for mutual overlap.
-    # A window may share the boundary month only if it ends before the boundary.
-    last_month = (pd.Timestamp(eligible_end) - pd.Timedelta(days=1)).to_period("M")
-    eligible_months = len(pd.period_range(
-        first_month.to_period("M"), last_month, freq="M"))
+    # Seen here as ETH (data_start 2021-02-08) placing W9 at
+    # 2025-09-01 -> 2026-02-28 against a 2026-02-01 pin, putting 6,168 fitted
+    # trades inside the holdout. Under the sliding cutoff the same fault gives
+    # eligible_end 2026-02-03 and a 25-day overrun; scanning data_end across 2026,
+    # 32 of 48 values breach, with overruns up to 30 days.
+    #
+    # The bug is data-dependent, which is why it survived: with more history the
+    # spare months absorb the miscount and no breach appears, so it comes and goes
+    # as the sample grows rather than failing consistently.
+    #
+    # Note (eligible_end - 1 day).to_period("M") is NOT sufficient -- it is correct
+    # only when eligible_end lands on the 1st of a month. For eligible_end
+    # 2026-02-03 it returns 2026-02, whose month-end 2026-02-28 is already past the
+    # boundary. The pin at 2026-02-01 is precisely the case where the wrong
+    # expression coincidentally agrees, so this must not be simplified back.
+    candidate = pd.Timestamp(eligible_end).to_period("M")
+    last_month = (candidate - 1
+                  if candidate.end_time.date() >= eligible_end else candidate)
+    eligible_months = max(0, len(pd.period_range(
+        first_month.to_period("M"), last_month, freq="M")))
     realised_n = min(N_REGIMES, eligible_months // REGIME_WINDOW_MONTHS)
     if realised_n < N_REGIMES:
         log.warning("History supports %d non-overlapping windows, requested %d",
@@ -116,9 +131,10 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     if any(a.end >= b.start for a, b in zip(ordered, ordered[1:])):
         raise AssertionError("Regime windows overlap")
 
-    # The guard that was missing. Overlap was checked; crossing the holdout was
-    # not, so a fitted window could leak into the out-of-sample region silently
-    # and the only symptom was holdout-dated rows in the trade log.
+    # The guard that was missing. Mutual overlap was checked; crossing the holdout
+    # boundary was not, so a fitted window could leak into the out-of-sample region
+    # with no symptom other than holdout-dated rows appearing in the trade log --
+    # which nothing asserted on either.
     breaches = [w for w in windows if w.end >= eligible_end]
     if breaches:
         raise AssertionError(
