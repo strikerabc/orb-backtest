@@ -1,0 +1,54 @@
+{
+  "_what_this_is": "EVENT_REGIME_PLAN.md section 9 validation suite -- the subset testing the permutation MACHINERY rather than the hypothesis. If these fail, the FOMC gate's numbers are void regardless of the calendar.",
+  "seed": 4242,
+  "axis": {
+    "dates": 1427,
+    "groups": 21,
+    "fomc_dates": 45,
+    "strata": 5
+  },
+  "tests": {
+    "test_1_shuffled_label_uniformity": {
+      "n_experiments": 200,
+      "n_null_draws_each": 2000,
+      "mean_p": 0.4862,
+      "median_p": 0.4988,
+      "frac_p_le_0.05": 0.045,
+      "expected_frac": 0.05,
+      "ks_distance": 0.0544,
+      "ks_critical_5pct": 0.0962,
+      "verdict": "PASS",
+      "what_failure_would_mean": "The permutation machinery finds significance in pure noise; every gate p-value is void."
+    },
+    "test_2_injected_effect": {
+      "injected_r": -0.3,
+      "observed_delta_with_injection": -0.356478,
+      "recovered_effect": -0.3,
+      "recovery_error": 0.0,
+      "perm_p": 0.0001,
+      "verdict": "PASS",
+      "what_failure_would_mean": "Pooling is broken or the design is blind to an effect 6x the size of the one sought."
+    },
+    "test_3_joint_draw_integrity": {
+      "contaminated_count_preserved": true,
+      "preserved_within_every_stratum": true,
+      "one_label_vector_drives_all_groups": true,
+      "n_groups": 21,
+      "n_draws_for_sd": 500,
+      "mean_cross_group_correlation": 0.0336,
+      "correlation_pairs_measured": 209,
+      "predicted_sd_ratio_from_correlation": 1.293,
+      "joint_null_sd": 0.026316,
+      "independent_permutation_null_sd": 0.021224,
+      "sd_ratio_joint_over_independent": 1.24,
+      "verdict": "PASS",
+      "what_failure_would_mean": "maxT correction is invalid with no other symptom. Independent per-family permutation collapses the null and inflates significance -- the review A1 defect, measured here."
+    }
+  },
+  "not_covered": {
+    "identity_flag_mode": "needs EVENT_FILTER_MODE (Phase C, not built)",
+    "known_fomc_channel_assignment": "needs event_tagging.py (Phase B, not built)",
+    "vol_profile_taxonomy": "needs 1m re-walk + T2 calendar; and per review I3/J5 the metric itself needs replacing with efficiency-by-third before it can validate anything",
+    "placebo": "already run in the FOMC gate: +7d p=0.477, -7d p=0.967"
+  }
+}

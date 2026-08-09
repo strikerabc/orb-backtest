@@ -807,6 +807,113 @@ Related, and worth knowing before quoting timings: the `163.4s` in
 sweep. A `--fresh` run recomputes trade shards, stats and null pools from zero and
 takes materially longer. Useful as a resume benchmark, not as full-sweep cost.
 
+### J5b. Complete gate analysis, extended sample
+
+Run on the corrected pinned sweep (5,275,740 rows, 7,502 variants, trade log ending
+2026-01-30). Full detail in `prereg/probe_results.json`, `prereg/gate_validation.json`,
+`outputs/holdout_verdict.json`.
+
+#### Repo test suite
+
+**32 passed** (`tests/test_correctness_review.py`, `test_data_integrity.py`,
+`test_entry_sm.py`, `test_sim.py`, `test_swing_detector.py`), 73s.
+
+#### The sweep's own five statistical gates
+
+These predate the event-regime work and are what the strategy is actually judged on.
+5,758 rankable variants of 7,502.
+
+| # | gate | result |
+|---|---|---|
+| 1 | **Null calibration** (matched-stop random-entry) | `null_p_broad` median **0.474**, 8.5% below 0.05; `null_p_matched` median **0.978**, 0.6% below 0.05. `null_unreliable` **0 of 5,758**. All 5,758 on matched-stop design, no swing fallback. |
+| 2 | **Multiplicity** (Westfall–Young step-down maxT + permutation FDR) | `p_adj_maxT` min **0.0280**, only **0.10%** ≤ 0.05. `q_fdr` min 0.0182, 0.83% ≤ 0.05. maxT hurdle **4.1232** across **1,254** families. |
+| 3 | **Breadth** | **82 of 5,758 (1.42%)** pass. |
+| 4 | **Survivor** (maxT ≤ 0.05 **and** breadth) | **3 of 5,758.** |
+| 5 | **Holdout** (2026-02-01 → 07-24, bounded) | 94 families, 195,014 trades simulated, 3,173 pooled. **40.4%** net-positive vs 50% chance. Trade-weighted **−0.0573 R**, CI **[−0.1555, −0.0510]**. **NO EDGE ESTABLISHED.** |
+
+Gate 1 is the one worth pausing on. `null_p_matched` median **0.978** means the median
+variant is *worse* than its own matched-stop random-entry comparator. Earlier work in
+this repo (`3cf063b`) had this median at 0.001 before the comparator was fixed; the
+calibration now holds. Combined with gate 4 returning **3 survivors**, and ~48 expected
+false positives at 5% across 976 rankable families, the in-sample tables are selection
+artefacts. Gate 5 confirms it out-of-sample with the CI excluding zero **on the loss
+side**.
+
+#### Event-regime gate (FOMC anticipation), extended
+
+45 FOMC dates in the traded axis (was 47 — the clamp fix moved the trade log end from
+2026-02-26 to 2026-01-30), 2,819,741 pooled trades, 1,382 clean days vs 45 contaminated.
+
+| test | delta net R | p | MDE |
+|---|---|---|---|
+| unstratified | −0.0565 | **0.024** | 0.071 |
+| weekday | −0.0565 | **0.087** | 0.067 |
+| weekday × vol | −0.0565 | 0.087 | 0.067 |
+| ex-2020-03-03 | −0.0571 | 0.092 | 0.067 |
+| placebo +7d | −0.0213 | 0.477 | 0.071 |
+| placebo −7d | +0.0312 | 0.967 | 0.069 |
+| **Level 0** (originating families) | **+0.0608** | 0.66 / 0.72 | **0.35 / 0.33** |
+
+Delta is stable across the extension (−0.0558 → −0.0565). Weekday-stratified p moved
+0.136 → **0.087**; since the delta barely changed, that came from the null distribution
+rather than the effect, and **both sides of the extension leave it above 0.05**. The
+conclusion is unchanged: **MDE 0.067 still exceeds both |delta| 0.0565 and the
+pre-registered 0.05**, so this remains underpowered rather than null, and the
+pre-registered rule says Phase A proceeds.
+
+Two honest caveats:
+
+- **The placebo is null but not perfectly centred.** +7d came in at −0.0213 (p = 0.48) —
+  not significant, but about a third of the real effect, where pre-extension it was
+  +0.0003. The −7d placebo went the other way (+0.0312, p = 0.97). Both non-significant,
+  so no calendar artefact is established, but "clean placebo" is a slightly weaker claim
+  than I made last turn.
+- **Level 0 still points the wrong way**, now +0.0608 (was +0.1160), with MDE 0.33–0.35 —
+  roughly 6× the effect sought. Uninformative in both directions, and the pooled headline
+  is unaffected by excluding it.
+
+Mechanism, clean → contaminated: mean net **−0.0885 → −0.1471 R**. Both firmly negative,
+which is the §H5 point restated on more data: the event effect is real in direction and
+a rounding error against the level.
+
+#### §9 validation suite — the machinery itself
+
+These test the permutation engine rather than the hypothesis. If they fail, every gate
+p-value above is void.
+
+| test | verdict | detail |
+|---|---|---|
+| **Shuffled-label uniformity** | **PASS** | 200 fake experiments × 2,000 draws. mean p **0.486**, median **0.499**, frac ≤ 0.05 = **0.045** (expected 0.05). KS **0.054** vs 5% critical **0.096**. |
+| **Injected synthetic effect** | **PASS** | −0.30 R forced onto FOMC days; recovered **−0.3000** exactly, p = **0.0001**. Pooling is intact and the design sees a real effect. |
+| **Joint-draw integrity** | **PASS** | Contaminated count preserved globally and within every stratum; one label vector drives all 21 groups. Joint null sd **0.02632** vs independent **0.02122** = **1.24×**. |
+
+**The third test empirically confirms review §A1**, which until now was an argument rather
+than a measurement. Independent per-family permutation **collapses the null by ~19%**,
+which is precisely the significance inflation §A1 predicted. Measured mean cross-group
+correlation is **ρ̄ = +0.0336** over 209 instrument-session pairs, and
+`Var(joint)/Var(indep) = 1 + (G−1)·ρ̄` predicts a **1.29×** sd ratio against 1.24×
+observed. The plan's §6.2 Level-1 instruction would have produced p-values too small by
+about that factor.
+
+**A note on how that test first failed.** Its initial run reported 0.96× and **FAIL** at
+K=64 draws. The criterion was right; the measurement was too coarse to resolve a 1.19×
+ratio. Raised to K=500 and it passes. Recorded because a sd-ratio test at low K is a trap
+that would read as a real defect — and because ρ̄ is now measured in the script rather
+than the threshold being asserted.
+
+#### Not covered, and why
+
+| plan §9 test | status |
+|---|---|
+| Identity: `mode="flag"` reproduces pre-change summary | **Not built** — needs `EVENT_FILTER_MODE` (Phase C). |
+| Known-FOMC-date channel assignment across sessions | **Not built** — needs `event_tagging.py` (Phase B). |
+| Vol-profile separates tagged IMPULSE from DIFFUSE | **Not built**, and per §I3/§J5 the metric needs replacing with efficiency-by-third before it can validate anything. |
+| Placebo returns null | **Done** — in the gate above. |
+
+So: **5 sweep gates + 32 unit tests + 3 machinery validations + 1 event gate with 6
+variants** complete. The machinery is sound, the strategy has no established edge, and the
+event effect is directionally consistent but underpowered.
+
 ### J5. Two more plan defects this exposed
 
 **`vol_profile_ratio` cannot discriminate on a mixed-channel day.** §6.3 uses mean
