@@ -1,9 +1,20 @@
-# data cache — large parquet files, never commit
-data/
+# ── Generated data and artifacts ────────────────────────────────────────────
+# Large parquet caches and run outputs. Regenerable, and far too big for git.
+data/*
 outputs/
 runs/
 
-# credentials — NEVER commit
+# ...but the event calendar is a VERSIONED INPUT, not a cache. A p-value computed
+# against a calendar that shifts between runs is not a p-value, so it is tracked.
+!data/events/
+
+# Committed evidence: pre-registrations, gate results, pinned baseline hashes.
+# These are small JSON and MUST be in history -- a pre-registration that is not in
+# version control has no evidential value, since it could be edited after seeing
+# results. The generated artifacts they describe stay ignored.
+!prereg/
+
+# ── Credentials — NEVER commit ──────────────────────────────────────────────
 .env
 *.env
 secrets.py
@@ -21,7 +32,7 @@ secrets.py
 credentials.json
 databento_key.txt
 
-# Python
+# ── Python ──────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.so
@@ -34,9 +45,10 @@ build/
 .coverage
 htmlcov/
 
-# OS
+# ── OS ─────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Local implementation review
-IMPROVEMENTS.md
+# ── Local working notes ────────────────────────────────────────────────────
+# Reviewer scratch, not part of the repo's documented state.
+docs/IMPROVEMENTS.md

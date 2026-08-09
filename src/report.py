@@ -37,7 +37,7 @@ def _verdict_banner(output_dir: Path) -> list[str]:
         return [
             "> **NO OUT-OF-SAMPLE TEST HAS BEEN RUN.**",
             "> Every table below is in-sample. With thousands of variants swept,",
-            "> in-sample rank is not evidence of edge. Run `test_holdout.py`.",
+            "> in-sample rank is not evidence of edge. Run `python tools/holdout_test.py`.",
             "",
         ]
     try:
