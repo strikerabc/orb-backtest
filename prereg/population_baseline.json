@@ -1,0 +1,12 @@
+{
+  "_doc": "Pinned population baseline for the holdout net-positive rate. Committed to prereg/ so it is tracked and survives a fresh clone, unlike outputs/hyp01_results.json which is gitignored.",
+  "source": "outputs/hyp01_results.json, produced by tools/analysis/hyp01_friction_premium.py",
+  "git_sha_of_run": "a92fcda",
+  "holdout_start": "2026-02-01",
+  "n_rankable_families": 976,
+  "population_net_positive_rate": 0.2659,
+  "population_net_positive_pct": 26.6,
+  "population_mean_net_r": -0.0957,
+  "description": "Fraction of ALL rankable families (not just survivors) that were net-positive in the holdout. This is the correct baseline for interpreting the survivor holdout net-positive rate (38.3%). A randomly-chosen family has 26.6% P(positive) out of sample, not 50%.",
+  "usage": "src/report.py reads this file via _pop_net_positive_pct() to fix the banner that previously printed 'chance is 50%'."
+}

@@ -38,21 +38,30 @@ def _whi(v: dict) -> float:
 def _pop_net_positive_pct(output_dir: Path) -> str:
     """Return the population net-positive rate as a formatted string.
 
-    Reads from outputs/hyp01_results.json if present; that file records the
-    fraction of all rankable families (not just survivors) that were net-
-    positive in the holdout — the correct baseline for "how often does a
-    randomly-chosen family happen to print positive out of sample."
+    Preference order:
+      1. prereg/population_baseline.json — tracked in git; survives a fresh clone.
+      2. outputs/hyp01_results.json — gitignored generated artefact; present only
+         after running the HYP-01 analysis tool.
+      3. Fallback "?" — honest gap rather than a silent wrong number (50%).
 
-    Falls back to "?" rather than 50% so the gap is visible instead of silent.
+    The population_net_positive_rate is the fraction of ALL rankable families
+    (not just survivors) that were net-positive in the holdout. It is the correct
+    benchmark for the survivor holdout rate (38.3%): a randomly-chosen family has
+    ~26.6% P(positive) out of sample, not 50%.
     """
-    try:
-        p = output_dir / "hyp01_results.json"
-        rate = json.loads(p.read_text(encoding="utf-8")).get(
-            "population_net_positive_rate")
-        if rate is not None:
-            return f"{100.0 * float(rate):.1f}%"
-    except Exception:
-        pass
+    # Walk up to the repo root (output_dir is typically outputs/)
+    root = output_dir.parent
+    for candidate in (
+        root / "prereg" / "population_baseline.json",
+        output_dir / "hyp01_results.json",
+    ):
+        try:
+            rate = json.loads(candidate.read_text(encoding="utf-8")).get(
+                "population_net_positive_rate")
+            if rate is not None:
+                return f"{100.0 * float(rate):.1f}%"
+        except Exception:
+            continue
     return "?"
 
 

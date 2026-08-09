@@ -1,34 +1,66 @@
 {
-  "_doc": "HYP-05 closure record. Gate condition failed: HYP-03 SHIFT and WIDTH placebos match the real range on trigger rate.",
+  "_doc": "HYP-05 closure record. Gate condition was voided by placebo design failure; closure rests on arithmetic ceiling.",
   "hypothesis": "HYP-05",
   "status": "CLOSED UNRUN",
-  "closed_by": "HYP-03 gate failure",
-  "gate_condition": "HYP-03 SHIFT and WIDTH must not match the real range on trigger rate or gross expectancy",
-  "gate_result": "FAILED — neither SHIFT nor WIDTH differs significantly from real (all Holm-adjusted p = 1.000)",
-  "width_result": "Δ = 0.00pp for every one of 25 instrument-sessions. Same-width band at different location fires on identical days.",
-  "shift_result": "Mixed — no pattern of real > shift. BTC/TOK -19.0pp and ETH/TOK -26.2pp show shifted window MORE active (wrong direction for gate). None significant after Holm.",
-  "rationale": "Characterising instrument heterogeneity in a signal that does not exist (level not special) is not informative. The cross-sectional programme closes.",
+  "closed_by": "arithmetic ceiling (§6.3), not HYP-03 gate",
+
+  "gate_record": {
+    "original_gate": "HYP-03 SHIFT and WIDTH must not match the real range on trigger rate",
+    "gate_result": "VOIDED — the trigger-rate test lacked discriminating power",
+    "width_defect": "Trigger rate saturates: price travels more than one range-width in almost every post-range window. Contingency table shows zero discordant days for BTC/TOK (49 days), ETH/TOK (60 days), BTC/LDN (47 days) despite clearly relocated WIDTH bands (Δrh up to ±250 ticks on BTC). Explanation: whether a day triggers is determined by that day's volatility, not by boundary location.",
+    "shift_defect": "Detection window is 42% shorter than real for NY rm=5 (84 vs 144 bars). Negative deltas (BTC/TOK -19pp, ETH/TOK -26pp) are confounded with time-at-risk, not evidence about level location.",
+    "correct_statement": "Level specialness is UNTESTED. The trigger-rate test was the wrong metric for this question.",
+    "diagnostic": "tools/diagnostics/hyp03_width_check.py (committed)"
+  },
+
+  "actual_closure_reason": {
+    "basis": "arithmetic ceiling — §6.3 of HYP_05_INSTRUMENT_HETEROGENEITY.md",
+    "arithmetic": {
+      "population_holdout_net_r": -0.0957,
+      "max_conditioner_premium": 0.0496,
+      "ceiling_net_r": -0.0461,
+      "required_gross_r_ES": 0.062,
+      "required_gross_r_pooled": 0.152,
+      "gap_at_ES": -0.1081,
+      "conclusion": "Even if the trade_count>=400 conditioner fully replicates (+0.0496), the ceiling is -0.046 R against a required 0.062 R for the cheapest instrument (ES). The cross-sectional programme characterises a negative-expectancy strategy. There is nothing to optimise."
+    },
+    "independent_of_hyp03": true
+  },
+
   "outstanding_items": {
     "trade_count_400_conditioner": {
       "status": "DEFERRED — requires fresh out-of-sample data not yet collected",
-      "reason": "The in-sample scan touched the holdout; that data is spent. Needs a new holdout slice (extend cache or wait for calendar time).",
-      "known_result": "premium +0.0496 R, monotone, survives clustered bootstrap at n>=400 threshold — exploratory only until separately confirmed OOS"
+      "reason": "The in-sample threshold scan touched the holdout; that data is spent for this conditioner.",
+      "known_result": "premium +0.0496 R, monotone across thresholds 100-600, survives clustered bootstrap — exploratory only",
+      "shrinkage_alternative": {
+        "status": "RUNNABLE NOW — no threshold was scanned; holdout is clean for this",
+        "description": "HYP-05 §6.1: estimate tau_sq in-sample, shrink family estimates, test whether shrunk beats raw at predicting holdout net R by OOS MSE. Parameter-free (tau_sq estimated from data, not chosen).",
+        "note": "A methodological result rather than a strategy one. Transfers to any future sweep on this codebase."
+      }
+    },
+    "level_specialness": {
+      "status": "GENUINELY UNTESTED",
+      "valid_tests_available": [
+        "time-to-first-break (conditional on triggering: is real level broken sooner?)",
+        "tap-in rate (does real range attract retests before continuation?)",
+        "post-break path efficiency (conditional on break: does price travel farther from real level than placebo?)"
+      ],
+      "note": "All computable from existing trade log without re-running engine. Exploratory unless pre-registered separately."
     },
     "rotate_placebo": {
       "status": "DEFERRED — IMPROVEMENTS §6.8 not yet implemented",
-      "reason": "ROTATE would address path-shape question after trigger, not trigger rate. Not warranted given WIDTH = 0pp result."
-    },
-    "universe_expansion": {
-      "status": "MOOT given gate failure",
-      "note": "More instruments raise the cross-sectional precision floor but there is no signal to characterise. Cost estimate skipped."
+      "note": "Not needed unless conditional metrics above show a path-shape signal worth investigating."
     }
   },
-  "hyp01_through_hyp04_summary": {
-    "HYP-01": "FALSIFIED — selection premium CI includes zero; 0/21 instrument-sessions clear friction floor",
-    "HYP-02": "CLOSED UNRUN — gross expectancy negative before inversion; no edge to invert",
-    "HYP-03": "CLOSED — level fires same as placebo (WIDTH=0pp all sessions, SHIFT mixed/non-significant)",
+
+  "reframe": "ORB fires near-100% of the time for most instrument-sessions. It is not a rare-setup strategy — it takes a trade every session-day. The opening range determines direction and stop placement only, not whether to trade. This reframes what was tested across all six hypotheses.",
+
+  "programme_summary": {
+    "HYP-01": "FALSIFIED — selection premium CI includes zero; 0/21 instrument-sessions clear friction floor after Bonferroni",
+    "HYP-02": "CLOSED UNRUN — gross expectancy negative before inversion; 10.8x shortfall on required gross",
+    "HYP-03": "CLOSED — placebo designs under-powered; level specialness untested; strategy arithmetic negative regardless",
     "HYP-04a": "FALSIFIED — range_quality uncorrelated with holdout R (rho CI includes zero)",
-    "HYP-04b": "SURVIVES in-sample; holdout CI includes zero — no confirmation",
-    "HYP-05": "CLOSED UNRUN (this document)"
+    "HYP-04b": "SURVIVES in-sample only; holdout CI includes zero — no confirmation",
+    "HYP-05": "CLOSED UNRUN — arithmetic ceiling (this document)"
   }
 }

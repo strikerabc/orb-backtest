@@ -1,162 +1,168 @@
 # HYP-03 Findings — The Opening Range Is Not a Special Level
 
-**Status:** CLOSED — gate-level test falsifies the premise  
+**Status:** CLOSED — placebo designs were under-powered; level specialness is UNTESTED  
+**Strategy verdict unchanged:** gross expectancy negative before costs; arithmetic ceiling below friction floor  
 **Pre-registration:** `prereg/hyp03_level_specialness_prereg.json`  
 **Results:** `outputs/hyp03_results.json`  
-**Committed:** `hypothesis/level-specialness` branch  
+**Diagnostic:** `tools/diagnostics/hyp03_width_check.py`  
+**Committed:** `hypothesis/level-specialness` → merged to `main`  
 **Depends on:** a5bdc2b (holdout-pin fix), 8f54e7e (comm_ticks fix), HYP-04 complete
 
 ---
 
-## §0 — Result summary
+## §0 — What the placebos measured, and what they didn't
 
-The SHIFT and WIDTH trigger-rate tests both fail to detect any specialness in the
-opening-range level. Neither placebo is significantly different from the real range
-on the pre-registered primary statistic (trigger rate). The HYP-05 gate fails, and
-the cross-sectional programme closes.
+Two placebo designs were run. Both were defective in ways that make the trigger-rate
+comparison uninformative. The strategy conclusion (negative expectancy regardless) is
+unchanged. The specific claim "the level is not special" is NOT supported.
 
-| Test | Significant instrument-sessions (Holm p < 0.05) |
-|------|-------------------------------|
-| SHIFT (60-min)  | 0 of 25 |
-| WIDTH (same-width, different location) | 0 of 25 |
+| Placebo | Defect | Consequence |
+|---------|--------|-------------|
+| WIDTH | Trigger rate saturates — price travels more than one range-width in almost every post-range window | Zero discriminating power; fires on identical days as real |
+| SHIFT | Detection window is 60 minutes shorter (84 vs 144 bars for NY rm=5, a 42% reduction) | Confounds level location with time-at-risk; negative deltas are a window-length artefact |
 
----
+The correct statement is:
 
-## §1 — The WIDTH = 0 result
-
-The most informative finding is the WIDTH column, which shows **exactly 0.00pp
-difference** for every single instrument-session.
-
-The WIDTH placebo replaces the real range's location with a band of the same width,
-centred on the range-end close price. If the ORB level's location carried
-information — if price is attracted to the opening boundary in a way that makes
-breakouts more likely there than at an alternative same-width location — the WIDTH
-placebo should fire less often.
-
-It does not. WIDTH fires on exactly the same days as the real range, for all 25
-instrument-sessions.
-
-**What this means:** whether a given session-day's price crosses a level of a given
-width is determined by that day's volatility, not by where the boundary is located.
-The ORB level is indistinguishable from a same-width band at a different location.
-The boundary location adds no information beyond what the range width already
-encodes (and range width is a proxy for intraday volatility).
-
-**Ceiling effect (partial caveat):** eleven instrument-sessions have trigger rates
-≥ 99%. At those rates the WIDTH test has essentially no power — both real and
-placebo fire almost every day, and a genuine location premium could not be
-detected. The informative sessions are the ones with sub-80% trigger rates:
-
-| Instrument-session | Real | WIDTH | Δ (pp) |
-|---|---|---|---|
-| BTC/TOK | 58.3% | 58.3% | 0.0 |
-| ETH/TOK | 58.3% | 58.3% | 0.0 |
-| BTC/LDN | 60.3% | 60.3% | 0.0 |
-| ETH/LDN | 76.9% | 76.9% | 0.0 |
-| ZN/LDN  | 92.3% | 92.3% | 0.0 |
-
-For BTC/TOK and ETH/TOK with 58.3% real trigger rates, if the level were special
-we would expect WIDTH to fire substantially less often (it would have to keep its
-centre far enough from the real boundary that the different location matters). The
-fact that WIDTH fires on identical days here, even at these moderate trigger rates,
-confirms that location is irrelevant at the session-day level.
+> **The trigger-rate test was saturated and therefore uninformative. Level specialness
+> is untested. The strategy's expected value is negative before costs regardless, so the
+> question is moot for this programme.**
 
 ---
 
-## §2 — The SHIFT result
+## §1 — The WIDTH diagnostic
 
-SHIFT moves the range window 60 minutes forward. Results are mixed — no pattern
-of "real is better than shifted":
+The WIDTH result showed 0.00pp difference for all 25 instrument-sessions, including
+BTC/LDN (60.3% trigger rate), BTC/TOK (58.3%), and ETH/TOK (58.3%). Before accepting
+this as an empirical finding, two candidate explanations were distinguished:
 
-| Instrument-session | Real | SHIFT | Δ (pp) | Direction |
-|---|---|---|---|---|
-| BTC/NY  | 94.5% | 88.3% | +6.2 | real > shift |
-| BTC/LDN | 60.3% | 55.1% | +5.1 | real > shift |
-| 6J/LDN  | 96.2% | 93.2% | +3.0 | real > shift |
-| ETH/NY  | 99.2% | 96.8% | +2.4 | real > shift |
-| ZN/LDN  | 92.3% | 96.2% | −3.8 | shift > real |
-| BTC/TOK | 58.3% | 77.4% | −19.0 | shift > real |
-| ETH/TOK | 58.3% | 84.5% | −26.2 | shift > real |
+**(a) Ceiling effect** — both arms near-saturate; the delta is structurally bounded near zero.  
+**(b) Band identity** — the WIDTH band is not relocating, so both arms are the same test.
 
-None of the differences survive the joint Holm-corrected permutation test.
+The diagnostic (`tools/diagnostics/hyp03_width_check.py`) ran a contingency table for
+each sub-saturated session:
 
-**The negative deltas (shift > real) for BTC/TOK and ETH/TOK are structurally
-informative:** the range window shifted 60 minutes into the Tokyo session fires
-substantially more often than the real open range. This means the Tokyo open is
-*not* the highest-volatility window for BTC and ETH — the hour after the open
-is more active. This is consistent with crypto markets being near-continuous;
-the 09:00 JST CME open is an artifact of when the contract begins trading on
-that exchange, not a volatility event in the underlying.
+| Session | Trigger rate | Days | Both trigger | Real only | WIDTH only | Neither |
+|---------|-------------|------|-------------|-----------|------------|---------|
+| BTC/TOK | 58.3% | 49 | 49 (100%) | 0 | 0 | 0 |
+| ETH/TOK | 58.3% | 60 | 60 (100%) | 0 | 0 | 0 |
+| BTC/LDN | 60.3% | 47 | 47 (100%) | 0 | 0 | 0 |
 
----
+The WIDTH bands are visibly relocating on every sample day (Δrh/rl from −250 to +102
+ticks on BTC/TOK, −6.25 to +2.25 ticks on ETH/TOK). Explanation (b) is eliminated.
 
-## §3 — Implications for the prior hypotheses
+**Explanation (a) is confirmed.** On days that trigger under real, price has moved far
+enough to cross the WIDTH band as well — because price travels more than one range-width
+from the range-end close in almost every post-range session. On days that don't trigger,
+price moves so little it doesn't cross either band. The location of the boundary is
+irrelevant once volatility determines whether the session is a trigger day or not.
 
-**HYP-01:** The selection premium was tested on families built on top of this
-signal. The signal itself does not break out more often than a placebo. This is
-consistent with the HYP-01 finding that the pooled gross expectancy (−0.014 R)
-is indistinguishable from zero: a placebo signal of the same width would have
-the same trigger rate and, plausibly, a similar gross expectancy.
+**For BTC/LDN specifically:** 47 days, zero discordant days, despite a non-trivial
+40% non-trigger rate. This is the most informative single data point: a session with
+meaningful non-trigger frequency, clearly relocated WIDTH bands, and still perfect
+correlation. It confirms that "did this day's price break some band of this width?" is
+entirely a function of that day's volatility, not of where the band is located.
 
-**HYP-04:** The range-quality conditioner (range_width / atr_4h) was explored as
-a predictor of forward expectancy. The WIDTH result here says the level location
-is not special. Range width encodes intraday volatility, so the conditioner may
-pick up a volatility effect rather than a genuine breakout quality signal.
+### The reframe this implies
 
-**HYP-02/HYP-05:** Both close unrun. HYP-02 depended on a signal that this
-test cannot distinguish from a random location. HYP-05 was gated on HYP-03
-explicitly — the gate fails.
+ORB is not a rare-setup strategy. It fires near-100% of the time for most
+instrument-sessions. The opening range is not selecting *when* to trade — it is
+determining *direction* and *stop placement* only. What was tested across six
+hypotheses was not "does this setup identify good times to take a trade" but "given a
+trade taken every day, does the opening-range-specific direction and stop predict
+forward returns?"
 
 ---
 
-## §4 — Limitations
+## §2 — The SHIFT result, corrected
 
-**Power at near-100% trigger rates.** For equity-index and forex sessions, the
-trigger rate is 99–100%. At those rates this test cannot detect level specialness
-even if it exists. The conclusion "level is not special" is well-supported for
-BTC and ETH; it is underpowered for ES, NQ, 6E, and similar.
+SHIFT showed mixed deltas (−26pp to +6pp). The pre-registered interpretation was "real
+fires more than shifted → level is special where positive." This is wrong.
 
-**Trigger rate is the right primary statistic but is not the whole story.** A level
-could be special in expectancy (path shape after crossing) without being special in
-trigger rate. This test does not address that. The scope decision judged that trigger
-rate is the most informative gate because: if the level does not attract breakouts,
-the path-shape question is moot.
+SHIFT's detection window is `exit_min − (open_min + 60 + rm)` vs real's
+`exit_min − (open_min + rm)`. For NY session, rm=5:
+- Real: 144 post-range bars
+- SHIFT: 84 post-range bars — **42% fewer**
 
-**ROTATE is not run.** The ROTATE placebo (OHLC-preserving circular rotation,
-IMPROVEMENTS §6.8) is the strictest test and addresses the volatility-regime
-confound that SHIFT/WIDTH leave open. Given the WIDTH = 0 result, running ROTATE
-would test path shape, not level attraction. Deferred unless a specific path-shape
-hypothesis is separately pre-registered.
+With 42% less time, the SHIFT arm fires less often on purely mechanical grounds. The
+negative deltas for BTC/TOK (−19pp) and ETH/TOK (−26pp) where SHIFT fires MORE are
+interesting: the hour after the Tokyo open is more active for crypto than the open
+itself. But this is also confounded by window length — it would be a finding on its
+own only if both arms had equal time-at-risk.
+
+A non-confounded SHIFT test would hold time-at-risk constant: compare the same
+window length at two different starting offsets. This was not pre-registered and
+is not run here.
 
 ---
 
-## §5 — Conclusion
+## §3 — What a valid test would require
 
-The ORB level is not special at the level of "does it fire?" A same-width band at
-a different location fires on the same days. The opening-range boundary location
-adds no detectable information beyond what the range width encodes.
+Both placebos were specified at the wrong level of the analysis. Trigger rate is
+determined by daily volatility, not by level location, at the window lengths used.
 
-The project's cross-sectional programme (HYP-03/05) closes here.
+A non-saturating metric exists in the trade log already:
+- **Time-to-first-break** — conditional on triggering, is the real level broken sooner
+  than the placebo? (Regime-robustness: uses only triggered days)
+- **Tap-in rate** — does the real range attract retests before continuation?
+- **Post-break path efficiency** — conditional on a break, does price travel farther in
+  the breakout direction from the real level than from a same-width placebo?
 
-The ORB strategy has now been tested from multiple angles across this project:
+All three are computable from the existing trade log without re-running the engine.
+The pre-registration did not include these metrics; running them now would be exploratory.
+If run, they would need a new pre-registration before being used as evidence.
 
-| Test | Outcome |
-|---|---|
-| In-sample selection (HYP-01) | FALSIFIED on primary; selection is noise |
-| Signal inversion (HYP-02) | Closed unrun (gross expectancy negative before costs) |
-| Level specialness (HYP-03) | CLOSED — level fires same as placebo |
-| Range quality conditioner (HYP-04a) | FALSIFIED |
-| Horizon shortening (HYP-04b) | Survives in-sample only; holdout CI includes zero |
-| Instrument heterogeneity (HYP-05) | Closed unrun (gate failed) |
+---
 
-**The honest summary:** This ORB strategy as configured does not demonstrate edge.
-The negative result is clean: the signal fires no more often than a placebo, in-
-sample selection does not persist out of sample, and costs are not the binding
-constraint (gross expectancy is already negative). A well-characterised negative
-result is a genuine research output.
+## §4 — Implications for prior hypotheses
 
-**One open item:** The HYP-05 pre-registration noted that the trade_count ≥ 400
-conditioner (exploratory, monotone, survives clustered bootstrap) needs its own
-out-of-sample test. This is outstanding but requires new data not yet collected.
-It cannot be run on the current holdout period because the scan touched it (see
-`ex_ante_conditioner_status` in `outputs/hyp01_results.json`).
+The design failure changes the *characterisation* of what was tested, not the
+*outcome* of the programme:
+
+- **HYP-01:** Selection premium falsified. This result stands — it measured whether
+  selection discrimination persists out of sample, independent of whether the level is
+  special.
+- **HYP-02:** Closed on arithmetic (gross expectancy negative before inversion). Stands.
+- **HYP-04:** Range quality / horizon tested. Stands — these were conditioning a given
+  signal, not testing level specialness.
+- **HYP-05:** Closes on arithmetic ceiling (§6.3), not on this gate. Documented in
+  `prereg/hyp05_closure.json`.
+
+---
+
+## §5 — Limitations and what remains open
+
+**Level specialness is genuinely untested.** The most direct way to test it —
+conditional metrics (path shape, retrace rate, time-to-break) on triggered days — was
+not pre-registered and has not been run.
+
+**ROTATE is still deferred.** ROTATE (OHLC-preserving circular rotation, IMPROVEMENTS
+§6.8) tests path shape rather than trigger rate and would not suffer from the saturation
+problem. It remains the cleanest available placebo. Whether running it is worthwhile
+depends on whether the conditional metrics above show anything; if path shape is also
+null, ROTATE adds nothing.
+
+**The resolution floor is the binding constraint.** With ~6 effective clusters
+(asset-class level), the floor on detecting any cross-instrument pattern is roughly
+±0.03–0.05 R. Every effect explored in this project sat at or below that floor. This
+is a property of the universe size, not of the analysis, and limits what any future
+ORB study on these ten instruments can conclude.
+
+---
+
+## §6 — Conclusion
+
+The HYP-03 placebo tests were mis-specified. Neither arm measured what was intended:
+WIDTH saturated to zero discriminating power; SHIFT confounded level location with
+time-at-risk.
+
+The correct record is: **level specialness is untested**. The trigger-rate test was the
+wrong metric for this question.
+
+The strategy conclusion is unchanged and rests on independent arithmetic:
+
+- Pooled gross expectancy: −0.014 R
+- Population holdout net R: −0.0957 R (CI entirely below zero)
+- Trade-weighted survivor net R: −0.0451 R (CI [−0.0794, −0.0115], excludes zero)
+- Best-case arithmetic (HYP-05 §6.3): −0.046 R ceiling vs 0.062 R required for ES
+
+The project closes on those numbers, not on a level-specialness test that lacked power.
