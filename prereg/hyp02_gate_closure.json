@@ -1,0 +1,49 @@
+{
+  "hypothesis": "HYP-02",
+  "title": "Range-boundary breakouts are anti-predictive",
+  "status": "CLOSED UNRUN",
+  "written_utc": "2026-08-09",
+
+  "gate_result": "FAIL",
+  "gate_criterion": "proceed only where |E[gross_r]| > 2 x cost_r per instrument-session",
+
+  "gate_measurements": {
+    "source": "outputs/hyp01_gross_net_by_instrument_session.csv",
+    "pooled_E_gross_r": -0.01441,
+    "pooled_cost_r": 0.07600,
+    "gate_ratio_pooled": 0.0948,
+    "gate_threshold": 1.0,
+    "gate_passes_pooled": false,
+    "per_session_worst_negative_gross": {
+      "ZN_LDN": -0.0466,
+      "ES_LDN": -0.0465,
+      "6E_LDN": -0.0413
+    },
+    "per_session_required_gross_for_gate": {
+      "ZN_LDN": 0.2664,
+      "ES_LDN": 0.1530,
+      "6E_LDN": 0.1858
+    },
+    "per_session_gate_margin": {
+      "ZN_LDN": "fails by 5.7x",
+      "ES_LDN": "fails by 3.3x",
+      "6E_LDN": "fails by 4.5x"
+    },
+    "sessions_passing_gate": 0,
+    "sessions_tested": 24
+  },
+
+  "why_the_gate_exists": "HYP-02 proposes inverting the strategy sign. Costs do not invert: if gross = -0.014 and cost = 0.076, the inverted strategy has gross = +0.014 and net = +0.014 - 0.076 = -0.062. The inversion makes things worse unless the GROSS edge is large enough to survive costs on both sides. The gate requirement |E[gross_r]| > 2 x cost_r ensures the magnitude of the gross signal exceeds the round-trip cost before inversion is arithmetic possible.",
+
+  "inversion_arithmetic": {
+    "pooled_gross": -0.01441,
+    "inverted_gross": 0.01441,
+    "cost": 0.07600,
+    "inverted_net": -0.06159,
+    "conclusion": "Inverting a -0.014 R gross edge yields +0.014 R gross and -0.062 R net. The inversion makes the losing strategy less losing in gross, and more losing in net."
+  },
+
+  "note_on_spec_observation": "Review finding R4 correctly identifies that null_p_matched median = 0.978 means the median breakout entry underperforms random entry at matched stop distance. However (a) 'anti-predictive' implies fading yields a positive gross, which this arithmetic shows it does not; (b) the matched null exits at TIME 48% of the time (vs 12% for the breakout variant), so the null accumulates more of its return from not being stopped, not from a positive directional signal; (c) the gross signal is -0.014 R -- worse than the matched null that sits near zero, but not large enough in magnitude for inversion to help after costs.",
+
+  "spec_action": "Close HYP-02 unrun. See docs/REVIEW_AND_HYPOTHESES.md HYP-02 §1 GATE: 'If gross is within noise of zero everywhere, HYP-02 is arithmetically dead and should be closed unrun.'"
+}
