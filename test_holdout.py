@@ -70,8 +70,22 @@ pd.set_option("display.max_rows", 200)
 FAMILY = ["instrument", "session", "range_minutes", "entry_mode",
           "closure_tf", "direction"]
 
-# Last regime window ends 2026-01-31; data runs to 2026-07-31.
+# Fitted windows end 2025-10-31 (2026-01-31 for ETH, which has 9 windows); data
+# now runs to 2026-08-07 after the August extension.
 HOLDOUT_START = "2026-02-01"
+
+# Upper bound, exclusive. The paper-trading period that generated the event-regime
+# hypothesis is 2026-07-25 -> 2026-08-07 (EVENT_REGIME_PLAN.md section 1.2,
+# prereg/event_prereg.json). It lies OUTSIDE the pre-extension sample, which is why
+# the holdout was clean for that hypothesis -- but the August extension pulled it
+# INTO the available data, and this filter previously had no end bound at all. Left
+# open, the holdout test would silently absorb the observation that produced the
+# hypothesis and stop being independent confirmation.
+#
+# Set to None to test the full post-holdout span, but only for questions unrelated
+# to the event-regime hypothesis.
+HOLDOUT_END_EXCLUSIVE: str | None = "2026-07-25"
+PAPER_PERIOD = ("2026-07-25", "2026-08-07")
 
 
 def hr(t: str) -> None:
@@ -139,6 +153,8 @@ def main() -> None:
         df = _compute_enrichment(ensure_data(sym), ensure_daily(sym),
                                  tick_size=INSTRUMENTS[sym]["tick_size"])
         df = df[df["timestamp"] >= pd.Timestamp(HOLDOUT_START, tz="UTC")]
+        if HOLDOUT_END_EXCLUSIVE is not None:
+            df = df[df["timestamp"] < pd.Timestamp(HOLDOUT_END_EXCLUSIVE, tz="UTC")]
         if df.empty:
             print(f"  {sym}: no holdout data")
             continue
@@ -282,6 +298,12 @@ def main() -> None:
     # reflects the LATEST holdout run instead of carrying stale claims.
     verdict = {
         "holdout_start": HOLDOUT_START,
+        "holdout_end_exclusive": HOLDOUT_END_EXCLUSIVE,
+        "paper_period_excluded": list(PAPER_PERIOD),
+        "paper_period_excluded_reason": (
+            "Observation-origin data for the event-regime hypothesis "
+            "(EVENT_REGIME_PLAN.md 1.2). Including it would make the holdout "
+            "absorb the observation that generated the hypothesis."),
         "families_rankable": int(n_fam_rank),
         "expected_fp_at_5pct": int(exp_fp),
         "survivor_families": int(len(fams)),
