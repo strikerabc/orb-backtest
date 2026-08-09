@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import (
-    HOLDOUT_MONTHS, N_REGIMES, REGIME_SEED,
+    HOLDOUT_MONTHS, HOLDOUT_PIN_START, N_REGIMES, REGIME_SEED,
     REGIME_WINDOW_MONTHS,
 )
 
@@ -45,9 +45,21 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     """
     rng = np.random.default_rng(REGIME_SEED)
 
-    # Exclude holdout from the end
-    holdout_cutoff = data_end - pd.DateOffset(months=HOLDOUT_MONTHS)
-    eligible_end   = pd.Timestamp(holdout_cutoff).date()
+    # Exclude holdout from the end.
+    #
+    # HOLDOUT_PIN_START, when set, fixes this boundary instead of deriving it from
+    # data_end. The derived form is a function of how much data is loaded, so adding
+    # data silently moves the out-of-sample slice -- and because this runs per symbol
+    # with that symbol's own data_end, ragged caches give each symbol a DIFFERENT
+    # boundary. None preserves the sliding default exactly.
+    if HOLDOUT_PIN_START is not None:
+        eligible_end = pd.Timestamp(HOLDOUT_PIN_START).date()
+        log.info("Holdout PINNED at %s (data_end=%s); sliding cutoff would have "
+                 "been %s", eligible_end, data_end,
+                 pd.Timestamp(data_end - pd.DateOffset(months=HOLDOUT_MONTHS)).date())
+    else:
+        holdout_cutoff = data_end - pd.DateOffset(months=HOLDOUT_MONTHS)
+        eligible_end   = pd.Timestamp(holdout_cutoff).date()
 
     first_month = pd.Timestamp(data_start) + pd.offsets.MonthBegin(0)
     if first_month.date() < data_start:

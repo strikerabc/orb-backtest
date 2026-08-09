@@ -353,6 +353,24 @@ REGIME_WINDOW_MONTHS: int   = 6
 # temporal spread while remaining random within each segment.
 HOLDOUT_MONTHS: int         = 3   # most-recent N months excluded from all windows
 
+# Pin the holdout boundary to a FIXED date instead of deriving it as
+# (data_end - HOLDOUT_MONTHS). None = the sliding default, unchanged behaviour.
+#
+# Why the capability exists: the sliding cutoff makes the holdout a function of how
+# much data happens to be loaded, so EXTENDING THE SAMPLE MOVES THE OUT-OF-SAMPLE
+# SLICE as a side effect. Worse, select_windows is called per symbol with that
+# symbol's own data_end, so with ragged caches "the holdout" is not one slice of
+# history -- it is up to ten different boundaries, each set by how fresh that
+# symbol's cache is. A holdout whose start date depends on download order is not a
+# holdout.
+#
+# Set this when a result must stay comparable across a data extension, and whenever
+# an out-of-sample window has to exclude a specific period. The event-regime work
+# requires it: unpinned, extending the data slides the holdout onto the
+# paper-trading period that generated the hypothesis, so the holdout would contain
+# its own originating observation. See docs/EVENT_REGIME_PLAN.md section 1.2.
+HOLDOUT_PIN_START: str | None = None
+
 # ── Event-regime conditioning (optional feature — src/events) ──────────────
 # Gates anything that would let event exposure INFLUENCE THE PIPELINE: the
 # EVENT_FILTER_MODE work in filters.py and the event-aware null pool

@@ -41,6 +41,16 @@ Not built (each needs a phase of its own -- see the plan):
     deterministic function of entry mode. The plan calls reversal rate "free"; it
     does not currently exist. See review section I3.
 
+## Reproducibility
+
+These figures were computed with `config.HOLDOUT_PIN_START = "2026-02-01"`. The pin is
+not optional for this hypothesis: unpinned, the holdout boundary slides with `data_end`,
+and after the August 2026 data extension it lands on the paper-trading period
+(2026-07-25 -> 2026-08-07) that generated the hypothesis -- so the holdout would contain
+its own originating observation. `tools/holdout_test.py` needs
+`HOLDOUT_END_EXCLUSIVE = "2026-07-25"` for the same reason. Both default to None on
+main, so they must be set deliberately when re-running this analysis.
+
 ## Headline result
 
 Delta -0.0565 R on FOMC anticipation days, unstratified p = 0.024 but weekday-

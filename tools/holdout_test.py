@@ -73,6 +73,17 @@ FAMILY = ["instrument", "session", "range_minutes", "entry_mode",
 # Last regime window ends 2026-01-31; data runs to 2026-07-31.
 HOLDOUT_START = "2026-02-01"
 
+# Upper bound, exclusive. None = test everything from HOLDOUT_START to the end of the
+# data, which is the right default for "does this strategy work out of sample".
+#
+# Set it when a specific period must be EXCLUDED from the out-of-sample read. The
+# event-regime work needs that: the paper-trading period 2026-07-25 -> 2026-08-07
+# generated the hypothesis, so including it would make the holdout absorb its own
+# originating observation and stop being independent confirmation. Before the August
+# data extension this was moot -- that period sat outside the sample entirely -- so
+# the absence of a bound was harmless until the extension pulled it in.
+HOLDOUT_END_EXCLUSIVE: str | None = None
+
 
 def hr(t: str) -> None:
     print("\n" + "=" * 116)
@@ -139,6 +150,8 @@ def main() -> None:
         df = _compute_enrichment(ensure_data(sym), ensure_daily(sym),
                                  tick_size=INSTRUMENTS[sym]["tick_size"])
         df = df[df["timestamp"] >= pd.Timestamp(HOLDOUT_START, tz="UTC")]
+        if HOLDOUT_END_EXCLUSIVE is not None:
+            df = df[df["timestamp"] < pd.Timestamp(HOLDOUT_END_EXCLUSIVE, tz="UTC")]
         if df.empty:
             print(f"  {sym}: no holdout data")
             continue
@@ -282,6 +295,7 @@ def main() -> None:
     # reflects the LATEST holdout run instead of carrying stale claims.
     verdict = {
         "holdout_start": HOLDOUT_START,
+        "holdout_end_exclusive": HOLDOUT_END_EXCLUSIVE,
         "families_rankable": int(n_fam_rank),
         "expected_fp_at_5pct": int(exp_fp),
         "survivor_families": int(len(fams)),

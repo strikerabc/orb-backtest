@@ -166,3 +166,45 @@ def test_determinism_under_fixed_seed():
     b = select_windows(date(2019, 1, 1), date(2026, 5, 3))
     assert [(w.index, w.start, w.end) for w in a] == \
            [(w.index, w.start, w.end) for w in b]
+
+
+# ── holdout pin ────────────────────────────────────────────────────────────
+
+def test_pin_defaults_to_none_so_behaviour_is_unchanged():
+    """The pin must be opt-in. A default value would move every existing result."""
+    from src.config import HOLDOUT_PIN_START
+    assert HOLDOUT_PIN_START is None
+
+
+def test_pin_fixes_the_boundary_across_data_extension():
+    """The point of the pin: the same boundary regardless of how much data is loaded.
+
+    Unpinned, extending data_end slides the holdout, so a result stops being
+    comparable to the one before the extension -- and any period newly pulled into
+    range silently enters the out-of-sample slice.
+    """
+    import importlib
+    import src.config as cfg
+    import src.regime_sampler as rs
+
+    original = cfg.HOLDOUT_PIN_START
+    try:
+        cfg.HOLDOUT_PIN_START = "2026-02-01"
+        importlib.reload(rs)
+        short = rs.select_windows(date(2019, 1, 1), date(2026, 5, 3))
+        long_ = rs.select_windows(date(2019, 1, 1), date(2026, 8, 7))
+        assert [(w.start, w.end) for w in short] == [(w.start, w.end) for w in long_], (
+            "pinned windows must not move when data_end advances")
+        for w in long_:
+            assert w.end < date(2026, 2, 1)
+    finally:
+        cfg.HOLDOUT_PIN_START = original
+        importlib.reload(rs)
+
+
+def test_unpinned_boundary_does_move_with_data_end():
+    """Guards the guard: proves the pin is load-bearing rather than decorative."""
+    short = select_windows(date(2019, 1, 1), date(2026, 5, 3))
+    long_ = select_windows(date(2019, 1, 1), date(2026, 8, 7))
+    assert [(w.start, w.end) for w in short] != [(w.start, w.end) for w in long_], (
+        "unpinned windows should move with data_end; if not, the pin proves nothing")

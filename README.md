@@ -4,9 +4,18 @@ Opening-range breakout research across futures instruments, with the statistical
 machinery needed to tell an edge from a selection artefact.
 
 **Current verdict: NO EDGE ESTABLISHED.** Out-of-sample, the in-sample survivors are
-indistinguishable from a coin flip — 40.4% net-positive against 50% by chance,
-trade-weighted −0.0573 R, CI [−0.1555, −0.0510]. The ranked in-sample tables are best
-read as selection artefacts. Full detail in `outputs/holdout_verdict.json` after a run.
+indistinguishable from a coin flip — 38.3% net-positive against 50% by chance,
+trade-weighted −0.0451 R, CI [−0.151, −0.045], 3,481 trades pooled across 94 families.
+The ranked in-sample tables are best read as selection artefacts. Full detail in
+`outputs/holdout_verdict.json` after a run.
+
+> **Provenance.** The committed evidence in `prereg/` and the artifacts in `outputs/`
+> were produced with `HOLDOUT_PIN_START = "2026-02-01"`. `main` defaults to `None`
+> (the sliding boundary), so a fresh sweep places its final window differently and
+> will not reproduce those files byte-for-byte. Set the pin to reproduce them. This is
+> recorded rather than papered over: the numbers are real, but they are not what
+> `main`'s defaults generate, and a reader comparing the two would otherwise conclude
+> something had broken.
 
 ---
 
