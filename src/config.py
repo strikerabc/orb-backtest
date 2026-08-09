@@ -353,6 +353,21 @@ REGIME_WINDOW_MONTHS: int   = 6
 # temporal spread while remaining random within each segment.
 HOLDOUT_MONTHS: int         = 3   # most-recent N months excluded from all windows
 
+# ── Event-regime conditioning (optional feature — src/events) ──────────────
+# Gates anything that would let event exposure INFLUENCE THE PIPELINE: the
+# EVENT_FILTER_MODE work in filters.py and the event-aware null pool
+# (docs/EVENT_REGIME_PLAN.md section 5.2). Neither is built yet.
+#
+# Defaults to False, and that default is load-bearing rather than cautious.
+# Enabling event filtering changes expectancies, breadth metrics, the null pool,
+# the maxT hurdle and the holdout verdict simultaneously — every number in the
+# repo — so it must never switch on as a side effect of merging the feature.
+#
+# The read-only analysis in src/events (probe, validation, case study) does NOT
+# consult this flag: it reads outputs/trade_log.parquet after the fact and cannot
+# alter a sweep result, so gating it would add ceremony without protection.
+EVENTS_ENABLED: bool = False
+
 # ── Null Calibrator ────────────────────────────────────────────────────────
 BOOTSTRAP_N: int            = 1000
 BOOTSTRAP_BLOCK_SIZE_DAYS: int = 5    # block-bootstrap block length

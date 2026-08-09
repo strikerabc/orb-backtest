@@ -1,0 +1,17 @@
+{
+  "description": "Baseline hashes for Phase C regression gate after holdout pin and window-end clamp",
+  "pinned_holdout_start": "2026-02-01",
+  "git_sha": "ab0d3af",
+  "trade_log_rows": 5275740,
+  "trade_log_date_range": [
+    "2019-04-01",
+    "2026-01-30"
+  ],
+  "summary_variants": 7502,
+  "hashes": {
+    "summary.parquet": "8be37d0ff27d73e14a430dabd6b3809813d902f86badd4be817a72f54e0214ba",
+    "trade_log.parquet": "26f68b21eef25477e969523c265536cbfb805cf622eb640948e70996a6a82607",
+    "summary_dataframe": "22aa98237827689720121ae3bc5fef8dc7fdd2bba0b1bf54b90faf320cb60039",
+    "trade_log_dataframe": "715427cb56717f80a3837a5a50b0a6c45e5fc1b0caf9527dea22b18834e1beca"
+  }
+}
