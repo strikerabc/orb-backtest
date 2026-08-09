@@ -35,6 +35,27 @@ def _whi(v: dict) -> float:
     return float(v.get("holdout_weighted_ci_hi", v.get("holdout_ci_hi", float("nan"))))
 
 
+def _pop_net_positive_pct(output_dir: Path) -> str:
+    """Return the population net-positive rate as a formatted string.
+
+    Reads from outputs/hyp01_results.json if present; that file records the
+    fraction of all rankable families (not just survivors) that were net-
+    positive in the holdout — the correct baseline for "how often does a
+    randomly-chosen family happen to print positive out of sample."
+
+    Falls back to "?" rather than 50% so the gap is visible instead of silent.
+    """
+    try:
+        p = output_dir / "hyp01_results.json"
+        rate = json.loads(p.read_text(encoding="utf-8")).get(
+            "population_net_positive_rate")
+        if rate is not None:
+            return f"{100.0 * float(rate):.1f}%"
+    except Exception:
+        pass
+    return "?"
+
+
 def _verdict_banner(output_dir: Path) -> list[str]:
     """
     Lead the report with the out-of-sample verdict, if one exists.
@@ -103,7 +124,8 @@ def _verdict_banner(output_dir: Path) -> list[str]:
         f"**2. Out-of-sample ({v['holdout_start']} onward, never used for "
         f"selection).** Of {v['holdout_families_tested']} families, "
         f"{v['holdout_net_positive']} stayed net-positive "
-        f"({v['holdout_net_positive_pct']}% — chance is 50%). "
+        f"({v['holdout_net_positive_pct']}% — population baseline is "
+        f"{_pop_net_positive_pct(output_dir)}). "
         f"Trade-weighted mean holdout net R = "
         f"**{v['holdout_trade_weighted_net_r']:+.4f}**, bootstrap 95% CI "
         f"[{_wlo(v):+.4f}, {_whi(v):+.4f}]"

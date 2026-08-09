@@ -1,0 +1,74 @@
+{
+  "_doc": "HYP-05 pre-registration. Committed before any analysis runs. Gate clause specifies that this hypothesis does not run if HYP-03 SHIFT+WIDTH placebos match the real range.",
+  "hypothesis": "HYP-05",
+  "title": "Per-Instrument Edge vs Pooled Edge",
+  "written_utc": "2026-08-09T22:38:00Z",
+  "git_sha_at_writing": "29dbc33356587746bb3855e1d42e39ec4bfd8b53",
+  "depends_on": ["HYP-03 SHIFT+WIDTH result", "a5bdc2b", "8f54e7e"],
+
+  "gate": {
+    "condition": "HYP-03 SHIFT and WIDTH must not match the real range on trigger rate or gross expectancy",
+    "action_if_gate_fails": "close HYP-05 unrun; characterising heterogeneity in a non-signal is not informative",
+    "rationale": "If SHIFT and WIDTH match the real range, sections 2-5 would be studying heterogeneity in a signal that does not exist. The correct move is to stop rather than characterise noise across instruments."
+  },
+
+  "h5a_variance_components": {
+    "model": "REML two-level random effects on day-clustered gross R, instrument-session level",
+    "primary": "tau_squared with profile-likelihood CI, and I_squared",
+    "secondary": "per-instrument shrinkage factor B_i = tau_sq / (tau_sq + sigma_i_sq)",
+    "kill": "I_squared < 0.25 or tau_squared CI includes zero -> pooling is correct, close cross-sectional line",
+    "note": "an uninformative CI is NOT evidence for homogeneity and will be reported as inconclusive, not as support for the null"
+  },
+
+  "h5b_rank_persistence": {
+    "primary": "Spearman rho between in-sample and holdout instrument-session gross expectancy rankings",
+    "restriction": "instrument-sessions with >= 200 holdout trades",
+    "threshold": "rho > 0.37 for one-sided 5% at n=21",
+    "abort_if": "fewer than 12 instrument-sessions clear the trade-count restriction",
+    "secondary": "top-quartile persistence: of top 5 in-sample, how many are top-10 in holdout? Expected under H0: 2.4"
+  },
+
+  "h5c_friction_viability": {
+    "primary": "per-instrument-session gap = E[gross_r] - cost_r, day-clustered CI, Holm over 21",
+    "report": "full ordered gap table regardless of significance",
+    "sensitivity": "0.5x and 2x measured slippage",
+    "note": "cost_r_i is instrument-specific throughout (not pooled); friction table in doc shows 44x spread from ES to ETH"
+  },
+
+  "h5d_structural": {
+    "primary_regressors": ["tick_size_over_price", "cost_r_at_median_r_ticks"],
+    "exploratory": ["median_r_ticks_over_atr", "asset_class", "session"],
+    "model": "meta-regression of instrument-session gross expectancy on primary regressors, weighted by inverse sigma_i_sq",
+    "note": "21 observations; exactly two primary regressors; everything else labelled exploratory. Power caveat: at the edge of estimability, will overfit if run as a search."
+  },
+
+  "h5e_shrinkage": {
+    "primary": "does shrunk in-sample family expectancy predict holdout net R better than raw, by OOS MSE",
+    "formula": "mu_shrunk_i = B_i * y_i + (1 - B_i) * y_bar, B_i = tau_sq / (tau_sq + sigma_i_sq)",
+    "parameter_free": true,
+    "supersedes": "trade_count >= 400 threshold scan",
+    "threshold_secondary_conditions": [
+      "stratum-matched baseline: E[OOS | selected AND n>=400] - E[OOS | all n>=400], not unstratified population",
+      "establish whether the threshold scan touched the holdout; if so, a fresh OOS slice is required"
+    ]
+  },
+
+  "clustering": {
+    "primary": "asset_class (~6 effective clusters)",
+    "secondary": "instrument (10)",
+    "report": "both; treat the wider one as the honest bound",
+    "rationale": "equity_index (ES/NQ/RTY), forex (6E/6J), crypto (BTC/ETH) are each effectively one cluster. Effective n ~ 6, not 10."
+  },
+
+  "framing_constraint": "No result in this document produces a tradable strategy. Ceiling is -0.046 R against required 0.062 (ES) to 2.719 (ETH TOK). This is stated before running any analysis and cannot be quietly promoted later.",
+
+  "section_7_checks": {
+    "a": "same-run confirmation: 38.3% predates the a5bdc2b holdout-pin fix; recompute if fix changed holdout membership",
+    "b": "n-effect check: compare P(positive) within matched holdout-trade-count strata"
+  },
+
+  "section_6_conditioner": {
+    "stratum_matched_before_proceed": true,
+    "scan_provenance_check": "establish whether the trade_count >= 400 scan touched the holdout before proceeding"
+  }
+}

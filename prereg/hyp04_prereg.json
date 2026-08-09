@@ -1,0 +1,72 @@
+{
+  "hypothesis": "HYP-04",
+  "title": "The signal is fine; the trade wrapper is mis-specified",
+  "written_utc": "2026-08-08",
+  "written_before_any_result_was_computed": false,
+  "what_was_looked_at_first": "Two feasibility checks were run BEFORE this file was written, and both changed the design. Recording that here rather than presenting their outcomes as predictions: (a) whether atr_4h contains look-ahead, and (b) whether bars_held is a pre-trade variable. Neither is a test of H4a/H4b/H4c; both are checks on whether the spec's tests mean what the spec says. Their results are in `design_corrections_from_feasibility_checks` below.",
+  "spec": "docs/REVIEW_AND_HYPOTHESES.md, HYP-04",
+  "git_sha_at_prereg": "a92fcda",
+
+  "claim": "Conditional expectancy varies systematically with variables known before the trade is taken. The pooled negative expectancy averages over a real gradient.",
+
+  "design_corrections_from_feasibility_checks": {
+    "atr_4h_is_clean": "data_layer._compute_atr_4h uses atr.shift(1) and merge_asof(direction='backward'), so the attached value is the last COMPLETED 4h bar. H4a's conditioner range_width_ticks/atr_4h is therefore genuinely knowable at range-end, as the spec claims. Checked because ATR_ANCHOR_ET=(18,0) with 240-minute bars puts the 06:00-10:00 bar across the NY 09:30 open, which would have been look-ahead.",
+    "bars_held_is_NOT_a_pre_trade_variable": "It is a consequence of the exit. Measured across bars_held deciles, corr(median bars_held, pct TIME exits) = +0.974, and E[gross_r] is U-shaped (+0.102 -> -0.107 -> +0.140) rather than monotone: decile 0 is 74.6% TP (fast winners), decile 9 is 65.2% TIME. The spec's first H4b analysis therefore measures EXIT-REASON MIX, not a horizon effect, and is demoted to descriptive.",
+    "time_exits_are_not_systematic_losers": "The spec predicts they are. Measured: TIME mean gross_r = +0.1061, against SL -1.0017 and TP +0.8252. But that comparison is near-tautological -- an SL exit is -1R by construction -- so it is reported as a refutation of the spec's prediction and NOT used as evidence for anything.",
+    "h4b_does_require_a_re_run": "The spec says H4b 'requires no re-run'. True for three of its four analyses, and those three are the confounded ones. The synthetic-exit curve -- the only analysis that can identify a horizon -- needs re-simulation, because trade_sim._first_touch_vectorized takes no horizon parameter and mfe_r/mae_r are terminal aggregates that cannot reconstruct where price sat at t=45min. A max_hold_bars parameter is added to trade_sim, defaulting to None so production behaviour is byte-identical.",
+    "bars_are_1_minute": "Verified: an ES/NY session window holds 210 bars = 60 context + 150 session minutes, so a horizon in minutes maps 1:1 onto bars."
+  },
+
+  "H4a": {
+    "claim": "Expectancy is monotone DECREASING in range_width_ticks / atr_4h.",
+    "mechanism": "A wide range gives a wide breakout threshold and, via the swing detector, a wide stop, while consuming the session's available travel.",
+    "primary_statistic": "Spearman rho between range_atr and gross_r, at TRADE level",
+    "why_spearman_not_decile_means": "Decile means invite reading noise as shape. Trade-level rank correlation tests monotonicity directly without binning, and the decile table is reported alongside as description only.",
+    "measure": "GROSS r. The mechanism is about available travel, and net would additionally carry a mechanical effect in the WRONG direction: a wider range gives a wider stop, which lowers cost_r = cost_ticks/r_ticks and so lifts net.",
+    "predicted_sign": "rho < 0",
+    "kill_criterion": "rho CI includes zero, or the decile pattern is non-monotone in sign",
+    "inference": "instrument-clustered bootstrap, 20000 draws, seed 0",
+    "why_clustered": "Four findings in this session lost significance under instrument clustering. On 2.8M trades an i.i.d. interval will be tiny and will call almost any gradient significant; the honest unit of independence is the instrument, of which there are 10.",
+    "stratification": "repeat within parkinson_vol_14d terciles; the gradient must hold in all three, not merely pooled",
+    "stability_requirement": "report the sign of rho per instrument-session; a real effect should hold in most of the 24, not average out of a few",
+    "holdout_validation": "recompute rho on the 2026-02-01+ holdout. In sample this is discovery; the holdout is the test."
+  },
+
+  "H4b": {
+    "claim": "The 11:59 exit is arbitrary and materially wrong; edge decays inside the first N minutes.",
+    "pre_registered_single_alternative_horizon_min": 45,
+    "why_one_value_pre_registered": "The spec warns that a horizon read off the curve is in-sample and selected, and offers the choice between pre-registering one value or treating the curve as descriptive. One value is pre-registered here (45, the spec's own predicted optimum) so there is a confirmatory test; the full grid is reported as descriptive.",
+    "horizon_grid_descriptive": [15, 30, 45, 60, 90, 120],
+    "primary_statistic": "E[gross_r] at a 45-minute hold cap minus E[gross_r] at the incumbent 11:59 exit, same trades, paired",
+    "predicted_sign": "> 0",
+    "kill_criterion": "the 45-minute delta CI includes zero",
+    "inference": "instrument-clustered bootstrap over the paired per-trade difference",
+    "measure": "GROSS r primary. A shorter hold does not change r_ticks, so cost_r is unchanged and the net delta equals the gross delta; both are reported to confirm that identity holds empirically.",
+    "binding_note": "NY/30m has only 120 post-range minutes, so the 120-minute horizon does not bind there. Every other session-range pair admits the full grid. Non-binding cells are reported as such rather than silently averaged in.",
+    "holdout_validation": "recompute the 45-minute delta on the holdout."
+  },
+
+  "H4c": {
+    "claim": "The swing-cluster stop couples entry timing to stop width, corrupting both R and cost.",
+    "status": "DEFERRED, not run",
+    "why_deferred": "The spec itself marks it LOW priority on the grounds that null_p_matched uses the OBSERVED stop distance with random timing, so its 0.978 median implicates timing rather than width. Testing three alternative stop rules (ATR, RANGE, FIXED) at matched distance requires re-deriving stops and re-simulating the full grid three times -- comparable in cost to HYP-03's cheap placebos, against a prior the spec already calls weak. Deferring is a scope decision, recorded rather than silently skipped.",
+    "if_run_later": "All three alternatives must be compared at MATCHED r_ticks, or the comparison is between cost structures rather than stop rules and is void."
+  },
+
+  "multiplicity": {
+    "confirmatory_tests": 2,
+    "list": ["H4a rho < 0", "H4b 45-minute delta > 0"],
+    "correction": "Bonferroni across the two confirmatory tests (alpha 0.025 each). Only two rather than the spec's '3 sub-hypotheses x ~24 instrument-sessions' because per-cell tests are reported as stability description, not as separate confirmatory claims -- multiplying 24 cells into the confirmatory set would demand a hurdle nothing could clear while adding no information the pooled test lacks."
+  },
+
+  "limitations_acknowledged_in_advance": [
+    "Both conditioners correlate with volatility, which correlates with everything. Stratification by parkinson_vol_14d tercile is required, not optional.",
+    "Decile analysis on 2.8M trades produces significant gradients on almost any variable. The question is whether the gradient is monotone, stable across instrument-sessions, and survives on the holdout -- not whether it is significant.",
+    "H4a's practical value depends on the excluded tail being large enough to matter and small enough to preserve sample. Trade count retained at each candidate cutoff is reported.",
+    "HYP-01 falsified its primary, and its kill rule says that closes HYP-01/02/03. It does not mention HYP-04, and HYP-04 is a different claim -- that expectancy varies with pre-trade observables, which can be true even when SELECTION carries no premium. HYP-01's winner's-curse finding is in fact a HYP-04-shaped result. Running HYP-04 is therefore consistent with HYP-01's outcome rather than in spite of it."
+  ],
+
+  "analysis_tool": "tools/analysis/hyp04_trade_construction.py",
+  "no_new_data_required": true,
+  "spend_usd": 0.0
+}

@@ -1,0 +1,63 @@
+{
+  "_doc": "HYP-03 pre-registration for SHIFT and WIDTH placebo sweeps. Committed before any placebo runs. Scope decision (hyp03_scope_decision.json) deferred this until HYP-04 results were known; HYP-04 is now complete.",
+  "hypothesis": "HYP-03",
+  "title": "The opening range is not a special level — SHIFT and WIDTH placebo sweeps",
+  "written_utc": "2026-08-09T22:38:00Z",
+  "git_sha_at_writing": "29dbc33356587746bb3855e1d42e39ec4bfd8b53",
+  "depends_on": ["HYP-04 results known", "a5bdc2b", "8f54e7e"],
+
+  "placebos": {
+    "SHIFT": {
+      "description": "Opening range window shifted 60 minutes later than the real range. Range bars: open+60 to open+60+rm. Detection window: open+60+rm onward. Destroys the privileged status of the open.",
+      "shift_offset_minutes": 60,
+      "note": "If breakout rate above SHIFT band matches the real level, the open is not special — timing explains nothing."
+    },
+    "WIDTH": {
+      "description": "Same-width band centered on the close price at the end of the real range window (bar at open+rm-1). Level location changes; width is preserved. Destroys range location while preserving stop/target size.",
+      "note": "If breakout rate matches, range width (stop and target size) explains the whole result and the boundary location carries nothing."
+    },
+    "ROTATE": "DEFERRED — requires OHLC-preserving tuple decomposition (IMPROVEMENTS §6.8). Most informative placebo; run if SHIFT and WIDTH both fail to match the real range.",
+    "PRIOR": "SKIPPED — inherits yesterday's volatility, which correlates with today's. Weakest placebo."
+  },
+
+  "primary_statistic": {
+    "metric": "trigger_rate",
+    "definition": "fraction of session-days where at least one II entry fires (real or placebo)",
+    "rationale": "trigger rate is the most informative and least friction-confounded check: if the real range is broken no more often than a same-width placebo band, the level premise fails before expectancy is consulted"
+  },
+
+  "secondary_statistics": [
+    "E[gross_r] per (instrument, session) paired against placebo",
+    "path_efficiency: median |exit_r| / session_range for triggered days"
+  ],
+
+  "inference": {
+    "test": "paired permutation test at the day level",
+    "permutation_unit": "session-day (real/placebo label exchangeable within each day)",
+    "joint": "maxT correction across instrument-sessions for multiplicity",
+    "n_permutations": 20000,
+    "seed": 0,
+    "alpha": 0.05
+  },
+
+  "period": "holdout only (2026-02-01 onward) for primary; full sample as sensitivity",
+
+  "kill_criterion_for_hyp05": {
+    "condition": "SHIFT trigger_rate == real AND WIDTH trigger_rate == real (neither Holm-adjusted p < 0.05)",
+    "action": "close HYP-05 unrun; level is not special"
+  },
+
+  "continue_criterion": {
+    "condition": "at least one of SHIFT or WIDTH shows significantly lower trigger rate than real (Holm p < 0.05)",
+    "action": "proceed to HYP-05; level carries information that the placebo does not"
+  },
+
+  "rotate_decision": {
+    "if_shift_or_width_worse": "SHIFT or WIDTH is distinguishable from real -> ROTATE is needed to close the volatility-regime confound; add to backlog",
+    "if_both_match": "ROTATE not needed; level not special"
+  },
+
+  "data": "holdout parquet cache already on disk; no API calls, no spend",
+  "compute_estimate_minutes": 14,
+  "cost_usd": 0.0
+}

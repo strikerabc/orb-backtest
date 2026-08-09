@@ -307,7 +307,7 @@ def main() -> None:
     ci_includes_zero = weighted.includes_zero
     print(f"  in-sample survivors below chance rate : {len(fams) <= exp_fp}")
     print(f"  holdout net-positive rate             : "
-          f"{100.0*held_fam/n_fam:.1f}%  (chance = 50%)")
+          f"{100.0*held_fam/n_fam:.1f}%  (chance = 50% per flip; population baseline: see below)")
     print(f"  trade-weighted holdout net_r          : {pooled:+.4f}")
     print(f"  its own bootstrap 95% CI              : "
           f"[{weighted.lo:+.4f}, {weighted.hi:+.4f}]")
@@ -394,6 +394,24 @@ def main() -> None:
         # second licenses HYP-02's inversion question; the first does not.
         "holdout_sign_verdict": weighted.sign_verdict("holdout net R"),
     }
+    # Population net-positive rate: fraction of ALL rankable families that were
+    # net-positive in the holdout, from HYP-01 results. This is the correct
+    # baseline for "is 38.3% unusual?" -- a random family has 26.6% P(positive),
+    # not 50%. Read from hyp01_results.json if available; omit rather than guess.
+    _hyp01 = _OUT / "hyp01_results.json"
+    if _hyp01.exists():
+        try:
+            _h1 = json.loads(_hyp01.read_text(encoding="utf-8"))
+            _pnp = _h1.get("population_net_positive_rate")
+            if _pnp is not None:
+                verdict["population_net_positive_pct"] = round(100.0 * float(_pnp), 1)
+                print(f"\n  Population baseline (all rankable families): "
+                      f"{verdict['population_net_positive_pct']:.1f}% net-positive in holdout.")
+                print(f"  Survivor rate of {100.0*held_fam/n_fam:.1f}% vs baseline "
+                      f"{verdict['population_net_positive_pct']:.1f}% -> lift "
+                      f"{100.0*held_fam/n_fam - verdict['population_net_positive_pct']:+.1f}pp")
+        except Exception:
+            pass
     vpath = _OUT / "holdout_verdict.json"
     vpath.write_text(json.dumps(verdict, indent=2), encoding="utf-8")
 

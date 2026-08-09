@@ -1,0 +1,45 @@
+{
+  "_doc": "HYP-03 scope decision record.",
+  "_written_utc": "2026-08-09",
+  "hypothesis": "HYP-03",
+  "title": "The opening range is not a special level",
+
+  "spec_claim": "This is the only test in the set that can CLOSE the project. Every other hypothesis assumes the level means something and asks how to trade it better. If it does not, HYP-01/02/04 are all refinements of a premise that failed, and the honest move is to stop.",
+
+  "kill_rule_conflict": {
+    "hyp01_kill_rule_says": "HYP-01 was falsified on its primary; the spec's kill rule says this closes HYP-01/02/03.",
+    "hyp03_spec_says": "HYP-03 is the only test that can close the project.",
+    "resolution": "These are consistent but address different questions. HYP-01's kill rule says selection failed (the meta-hypothesis about which variants to trade) and does not say the underlying level carries no information. HYP-03 asks whether the level itself is special, independent of selection. A level can attract price, predict continuation rates, or influence path shapes without any selection procedure having found a profitable exploitation of it. HYP-01's result closes the selection question; HYP-03's question remains open."
+  },
+
+  "what_the_cheap_tests_would_tell_us": {
+    "trigger_rate_test": {
+      "cost": "one groupby on trade_log.parquet plus a random-band simulation",
+      "finding_if_positive": "The opening range is broken more often than a same-width band at a shifted level -- the level attracts breakouts. Even with zero directional edge this is a publishable finding: the level matters structurally even if it does not predict direction.",
+      "finding_if_negative": "The level is not special. HYP-02/04's inversion and wrapper refinement both rest on a premise (the boundary is real) that failed.",
+      "estimate_minutes": 30
+    },
+    "shift_and_width_placebos": {
+      "description": "SHIFT (range at open+60min) and WIDTH (same-width band centered on range-end close) are build_session_days calls with different range bounds, then the existing pipeline. Roughly one sweep each on the holdout.",
+      "estimate_hours": 2,
+      "cost_usd": 0.0
+    },
+    "prior_placebo": {
+      "description": "Yesterday's range at the same clock offset, re-anchored to today's range-end close.",
+      "estimate_hours": 2,
+      "cost_usd": 0.0
+    },
+    "rotate_placebo": {
+      "description": "Real range, post-range path circularly rotated (IMPROVEMENTS §6.8). Budget one day; write the identity test first.",
+      "estimate_days": 1,
+      "cost_usd": 0.0,
+      "note": "Most informative but most expensive. The seam discontinuity must be characterised and excluded if it exceeds a few percent of triggers."
+    }
+  },
+
+  "recommendation": "Run the trigger-rate test first (30 minutes). If the real range shows no excess trigger rate over SHIFT and WIDTH, the level is not special and the project closes. If it does, the further placebos distinguish structure from coincidence and inform whether HYP-04's conditioners (range_quality) are measuring something real.",
+
+  "blocker": "HYP-04 is still running. The trigger-rate test is cheap but should not begin until HYP-04's results are known, because HYP-04a's finding about range_width/atr_4h directly speaks to what the trigger-rate test should look for -- if range quality degrades expectancy, then high-quality ranges (narrow relative to ATR) may show excess trigger rates while low-quality ones do not, and the two tests should be interpreted jointly.",
+
+  "status": "DEFERRED pending HYP-04 results. Trigger-rate test is pre-scoped and quick; decision to proceed will be made after reading HYP-04 output."
+}
