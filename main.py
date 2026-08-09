@@ -114,7 +114,7 @@ def run() -> None:
     # ── 2. Select regime windows ───────────────────────────────────────────
     windows_by_symbol = {
         sym: select_windows(df["timestamp"].min().date(),
-                            df["timestamp"].max().date())
+                            df["timestamp"].max().date(), label=sym)
         for sym, df in data.items()
     }
     window_lookup = {

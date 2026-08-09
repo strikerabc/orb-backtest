@@ -19,6 +19,7 @@ rather than failing consistently.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import date
 
 import numpy as np
@@ -208,3 +209,106 @@ def test_unpinned_boundary_does_move_with_data_end():
     long_ = select_windows(date(2019, 1, 1), date(2026, 8, 7))
     assert [(w.start, w.end) for w in short] != [(w.start, w.end) for w in long_], (
         "unpinned windows should move with data_end; if not, the pin proves nothing")
+
+
+# ── pin validation against the loaded data (review finding R5) ────────────────
+#
+# The pin was accepted without ever being compared to the data it is an assertion
+# about. A pin at or after data_end produced NO holdout region and said nothing:
+# windows were fitted up to the pin, and the boundary guard compared them against
+# eligible_end -- which the pin itself supplies -- so it validated them against a
+# fiction and passed. Verified before the fix: pin 2027-01-01 with data_end
+# 2026-04-30 placed W09 at 2026-04-01->2026-09-30, wholly outside the data, with
+# every artifact still reporting that an out-of-sample test had been performed.
+#
+# Latent rather than live when found: the configured pin 2026-02-01 sits 3-6 months
+# before data_end for all 18 cached files. It becomes live as soon as one symbol's
+# cache is rebuilt short -- the ragged-cache case the pin exists to defend against,
+# since select_windows runs per symbol with that symbol's own data_end.
+
+@contextmanager
+def pinned(value):
+    """Set HOLDOUT_PIN_START and reload the module that read it at import time."""
+    import importlib
+    import src.config as cfg
+    import src.regime_sampler as rs
+    original = cfg.HOLDOUT_PIN_START
+    try:
+        cfg.HOLDOUT_PIN_START = value
+        importlib.reload(rs)
+        yield rs
+    finally:
+        cfg.HOLDOUT_PIN_START = original
+        importlib.reload(rs)
+
+
+@pytest.mark.parametrize("pin", ["2026-04-30", "2026-06-01", "2027-01-01"])
+def test_pin_at_or_after_data_end_raises(pin):
+    """No holdout region can exist, so the run must not proceed as if one does."""
+    with pinned(pin) as rs:
+        with pytest.raises(ValueError, match="at or after data_end"):
+            rs.select_windows(date(2019, 4, 1), date(2026, 4, 30))
+
+
+def test_pin_too_early_to_fit_a_window_raises():
+    """Distinct failure: the boundary is inside the data but leaves too little room.
+    Previously logged a warning and returned [], so every variant for the symbol was
+    scored on nothing while the run reported success."""
+    with pinned("2019-06-01") as rs:
+        with pytest.raises(ValueError, match="fits zero"):
+            rs.select_windows(date(2019, 4, 1), date(2026, 4, 30))
+
+
+def test_short_history_without_a_pin_still_returns_empty():
+    """The converse, so the check above cannot be satisfied by raising on all short
+    histories. An unpinned symbol with a late data_start legitimately has nowhere to
+    fit windows, and that is not an error."""
+    assert select_windows(date(2026, 1, 1), date(2026, 4, 30)) == []
+
+
+def test_valid_pin_is_unaffected_by_the_guard():
+    with pinned("2026-02-01") as rs:
+        ws = rs.select_windows(date(2019, 4, 1), date(2026, 4, 30))
+        assert len(ws) == N_REGIMES
+        assert all(w.end < date(2026, 2, 1) for w in ws)
+
+
+def test_configured_pin_is_valid_for_the_shortest_cached_symbol():
+    """Guards the specific latent case. ES/NQ end 2026-05-03 while every other
+    cached symbol ends 2026-08-07, so the shortest history is what any pin has to
+    clear. Pinned at 2026-02-01 this passes with ~3 months to spare; the test exists
+    so that moving the pin later without extending ES/NQ fails here rather than in a
+    sweep."""
+    with pinned("2026-02-01") as rs:
+        ws = rs.select_windows(date(2019, 1, 1), date(2026, 5, 3), label="ES")
+        assert len(ws) == N_REGIMES
+
+
+def test_error_text_names_the_symbol():
+    """select_windows runs per symbol, so a pin can be valid for nine instruments and
+    invalid for the tenth. Without the label the failure reports a bare date range and
+    does not say which symbol produced it."""
+    with pinned("2027-01-01") as rs:
+        with pytest.raises(ValueError, match=r"\[GC\]"):
+            rs.select_windows(date(2019, 4, 1), date(2026, 4, 30), label="GC")
+
+
+def test_windows_past_data_end_are_rejected_independently_of_the_pin():
+    """The boundary guard compares windows against eligible_end, a value config can
+    supply. This invariant compares against data_end, measured from the loaded data,
+    so it holds even when the pin is wrong.
+
+    Calls the production function directly. It is unreachable through select_windows
+    (the pin guard rejects pin >= data_end earlier, and unpinned runs put
+    eligible_end strictly before data_end), so testing it via a reimplementation
+    here would pass even if the production check were deleted.
+    """
+    from src.regime_sampler import assert_windows_within_data
+
+    ws = select_windows(date(2019, 1, 1), date(2026, 8, 7))
+    assert ws, "fixture produced no windows"
+
+    assert_windows_within_data(ws, date(2026, 8, 7))        # real data_end: passes
+
+    with pytest.raises(AssertionError, match="extend past data_end"):
+        assert_windows_within_data(ws, date(2020, 1, 1), label="ZN")
