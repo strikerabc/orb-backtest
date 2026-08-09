@@ -617,26 +617,48 @@ fixed and comparable, and **May 1 → Jul 24 becomes a second independent OOS wi
 (~59 trading days, free). Jul 25 → Aug 7 remains observation-origin and is barred
 from confirmatory use.
 
-Critically for the Phase C gate, the pin reproduces **what the baseline actually ran**,
-not merely a self-consistent result. The baseline executed unpinned at `data_end`
-2026-05-03 (ES/NQ were the binding constraint); pinned at `data_end` 2026-08-07 gives
-the same 10 windows with the same bounds. So fitted history is unchanged across the
-extension, and any diff in the rebuilt artifacts is attributable to added data rather
-than moved windows.
+**Correction to an earlier claim in this document.** I previously wrote that the pin
+reproduces "what the baseline actually ran." That holds for **ES/NQ only**. It is wrong
+for the other eight instruments, and the reason matters.
 
-**Open item.** The rebuild logs `Trade log: 5,289,468 rows` against a baseline of
-5,294,256 — **4,788 fewer (0.09%)** despite strictly more data. Two candidate causes
-were tested and eliminated: fitted windows are identical (above), and the ES/NQ
-`_mixed` vs `_db` caches are bit-identical (2,456,056 and 2,453,542 rows, matching
-timestamps and closes). Remaining candidate is enrichment recomputation — extending a
-cache makes `_merge_and_cache` recompute ATR and `_compute_enrichment` recompute
-rolling stats over the merged frame, which can shift values at boundaries and change
-eligibility at the margin.
+`select_windows` is called **per symbol**, with that symbol's own `data_end`
+(`main.py:116`, `runs/gpu_cpu_sweep.py:111`). At baseline time the caches were ragged:
 
-Not yet diagnosable: `main.py` writes `trade_log.parquet` inside `write_report`
-(line 190), *after* null calibration (line 182), so the file on disk is still the
-baseline until the run completes. Deferred rather than guessed at. The pinned hashes
-in `prereg/baseline_hashes_pre_extension.json` make the diff exact when it lands.
+| instruments | cache ended | unpinned cutoff | window 9 ended |
+|---|---|---|---|
+| ES, NQ | 2026-05-03 | 2026-02-03 | 2025-12-31 |
+| RTY, CL, BTC, ETH, GC, ZN, 6E, 6J | 2026-08-02 | **2026-05-02** | **2026-03-31** |
+
+So for eight of ten instruments the baseline's last fitted window ran three months
+later than I claimed — which is precisely why the baseline trade log carries 143,478
+trades in 2026 despite my asserting the fitted history stopped at 2025-12-31.
+
+This also explains the small row delta. The pin does not *remove* fitted data, it
+*relocates* the windows: 10 × 6 months is 60 months either way, so the total barely
+moves (4,788 rows, 0.09%). Different dates, not less data. The earlier "enrichment
+recomputation" hypothesis was unnecessary.
+
+**What the baseline was actually doing is worse than the pin.** With per-symbol
+cutoffs, "the holdout" was not one slice of history — it was up to ten different
+boundaries, each set by how fresh that symbol's cache happened to be. A holdout whose
+start date depends on download order is not a holdout. The pin makes it uniform, and
+unpinned at today's data 6E's holdout would be 2026-05-07 → 08-07, containing the paper
+period. The pin stays.
+
+**Consequence for Phase C:** `summary.parquet` will **not** be bit-identical to the
+pre-extension baseline for those eight instruments, and should not be expected to be.
+The gate must be **re-baselined** against the first pinned run rather than pointed at
+`prereg/baseline_hashes_pre_extension.json`. Those hashes remain useful as a record of
+the ragged-window era, not as a regression target.
+
+**Row delta — resolved.** The rebuild logs 5,289,468 trade rows against a baseline of
+5,294,256, i.e. 4,788 fewer (0.09%) despite strictly more data, and the pinned run
+produces 7,508 variants against 7,529. Both follow from window *relocation*, per the
+correction above: the eight ragged-cache instruments had window 9 pulled back from
+2026-03-31 to 2025-12-31, while total fitted span stayed at 10 × 6 months. Different
+dates, near-identical volume. No enrichment-recomputation effect needs to be invoked,
+and the ES/NQ `_mixed` vs `_db` caches were separately confirmed bit-identical
+(2,456,056 and 2,453,542 rows, matching timestamps and closes).
 
 ### J3. A cache-path bug nearly cost $18
 
@@ -712,6 +734,32 @@ carry. Your own session notes remain the only record at that resolution.
 
 And n=1 regardless: 2026-08-07 is observation-origin data and can never confirm the
 hypothesis. Its legitimate use is metric validation and effect sizing.
+
+### J4b. The real pipeline is gitignored
+
+Every artifact in `outputs/` is produced by `runs/gpu_cpu_sweep.py`, launched via
+`runs/start_gpu_cpu_sweep.ps1` — a process pool for the CPU simulation and statistics
+stages, CuPy/CUDA for bootstrap calibration, checkpointed per stage. `main.py` is the
+single-threaded path and is **not** what generated the baseline.
+
+`.gitignore` line 4 is `runs/`, so none of it is in version control. I spent 1.5 hours
+running the wrong entry point because the right one was invisible.
+
+That is a reproducibility hole larger than anything else in this review. The
+pre-registration, the calendar and the probe are all tracked, but **the program that
+computes the numbers they are compared against is not.** A branch that cannot rebuild
+its own artifacts cannot support the Phase C regression gate, and `manifest.json`'s
+`git_sha` is misleading while the executing code sits outside the repo.
+
+Recommend tracking the two sources — `runs/gpu_cpu_sweep.py` and
+`runs/start_gpu_cpu_sweep.ps1` — while keeping logs, checkpoints, `*.pid` and
+`gpu_cpu_sweep/` ignored. Small diff, and it closes the hole.
+
+Related, and worth knowing before quoting timings: the `163.4s` in
+`runs/gpu_cpu_sweep.stdout.log` is dated 2026-08-06 and sits alongside
+`gpu_cpu_sweep.pre_resume.stdout.log` — it is the tail of a **resumed** run, not a cold
+sweep. A `--fresh` run recomputes trade shards, stats and null pools from zero and
+takes materially longer. Useful as a resume benchmark, not as full-sweep cost.
 
 ### J5. Two more plan defects this exposed
 
