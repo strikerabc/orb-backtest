@@ -161,11 +161,25 @@ def _simulate_trade(
     rr_levels: list[float] = RR_LEVELS,
     *,
     reference: bool = False,
+    max_hold_bars: int | None = None,
 ) -> list[TradeResult]:
     """
     For each RR level, simulate the exit and return a TradeResult.
     sd.bars_* cover the full active window (from session open to11:59 bar).
     es.entry_bar_idx indexes into sd.bars_*.
+
+    max_hold_bars caps the hold at N bars after entry, forcing a TIME exit at the
+    close of bar N if neither TP nor SL is touched first. None (the default) is the
+    incumbent behaviour: hold to the 11:59 bar. Bars are 1-minute, so N is minutes.
+
+    Added for HYP-04's H4b, which asks whether the 11:59 exit is materially wrong.
+    The spec claims that test "requires no re-run"; it does. mfe_r and mae_r are
+    TERMINAL aggregates over the whole hold, so they cannot reconstruct where price
+    sat at t=45min, and _first_touch_vectorized has no horizon parameter. Truncating
+    the arrays here rather than teaching the walker about horizons keeps the exit
+    logic single-sourced: the walker returns TIME at the boundary on its own, and
+    mae_r/mfe_r are then computed over the truncated window, which is what a
+    genuinely shorter hold would have experienced.
     """
     tick     = sd.tick_size
     tv_usd   = INSTRUMENTS[sd.instrument]["tick_value_usd"]
@@ -189,10 +203,14 @@ def _simulate_trade(
     if start >= len(sd.bars_h):
         return [_invalid_result(rr, entry, sl, r_ticks, "NO_HOLD_BARS")
                 for rr in rr_levels]
-    h_arr = sd.bars_h[start:]
-    l_arr = sd.bars_l[start:]
-    o_arr = sd.bars_o[start:]
-    c_arr = sd.bars_c[start:]
+    # A hold cap truncates the post-entry window. `stop` is exclusive, so
+    # max_hold_bars=45 keeps bars [start, start+45) -- 45 minutes of holding.
+    stop = len(sd.bars_h) if max_hold_bars is None else min(
+        len(sd.bars_h), start + max(0, int(max_hold_bars)))
+    h_arr = sd.bars_h[start:stop]
+    l_arr = sd.bars_l[start:stop]
+    o_arr = sd.bars_o[start:stop]
+    c_arr = sd.bars_c[start:stop]
     nb    = len(h_arr)
 
     if nb == 0:
@@ -259,8 +277,17 @@ def simulate_trade(
     es: EntrySignal,
     sd: SessionDay,
     rr_levels: list[float] = RR_LEVELS,
+    *,
+    max_hold_bars: int | None = None,
 ) -> list[TradeResult]:
-    return _simulate_trade(es, sd, rr_levels, reference=False)
+    """Simulate exits for each RR level.
+
+    max_hold_bars caps the hold at N 1-minute bars after entry (None = hold to the
+    11:59 bar, the incumbent behaviour). Keyword-only so no existing positional call
+    can acquire a cap by accident.
+    """
+    return _simulate_trade(es, sd, rr_levels, reference=False,
+                           max_hold_bars=max_hold_bars)
 
 
 def _simulate_trade_reference(
