@@ -79,8 +79,14 @@ def detect_entries(sd: SessionDay) -> list[EntrySignal]:
         rh = sd.range_highs[rm]
         rl = sd.range_lows[rm]
 
-        # Range-end index: first active bar at or after open+rm
-        range_end_wall = open_min + rm
+        # Range-end index: first active bar at or after the range boundary.
+        # For real ranges this is open_min + rm; for SHIFT placebos the
+        # session-day carries the actual detection-start wall minute.
+        range_end_wall = (
+            sd.range_end_wall_mins[rm]
+            if sd.range_end_wall_mins and rm in sd.range_end_wall_mins
+            else open_min + rm
+        )
         active_start   = int(np.searchsorted(sd.bar_wall_mins, range_end_wall))
         if active_start >= len(sd.bars_h):
             continue

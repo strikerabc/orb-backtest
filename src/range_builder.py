@@ -22,6 +22,9 @@ log = logging.getLogger("orb.range")
 
 OHLCV = ["open", "high", "low", "close", "volume"]
 
+# Minutes the SHIFT placebo shifts the range window forward.
+SHIFT_OFFSET_MINUTES: int = 60
+
 
 @dataclass
 class SessionDay:
@@ -60,6 +63,12 @@ class SessionDay:
     regime_window: int | None = None
     bar_sources: np.ndarray | None = None
     bar_contracts: np.ndarray | None = None
+    # Placebo support: maps range_minutes → wall-minute where detection starts.
+    # None means "use open_min + rm" (real-range behaviour). Set by
+    # build_session_days when placebo_mode='shift' so the entry detector
+    # starts looking for breakouts after the shifted range end, not after the
+    # real range end (which would be 60 min too early).
+    range_end_wall_mins: dict[int, int] | None = None
 
 
 def _wall_mins(ts_series: pd.Series, tz: str) -> np.ndarray:
@@ -72,11 +81,21 @@ def build_session_days(
     df_1m: pd.DataFrame,
     sym: str,
     session_name: str,
+    placebo_mode: str = "real",
 ) -> list[SessionDay]:
     """
     Return a SessionDay for every trading day where the session has data.
-    Only days with a complete opening range (first N minutes all present)
-    for at least one range size are included.
+    Only days with a complete range (first N minutes all present for at
+    least one range size) are included.
+
+    placebo_mode controls how range boundaries are computed:
+      'real'  — standard opening-range extraction (default)
+      'shift' — range window shifted SHIFT_OFFSET_MINUTES forward; detection
+                starts after the shifted range end (not the real range end).
+                Tests whether the LEVEL itself matters or only the timing.
+      'width' — same range WIDTH as real, centred on the close at the end of
+                the real range window. Tests whether the LOCATION matters or
+                only the stop/target size.
     """
     sess     = SESSIONS[session_name]
     tz       = sess["tz"]
@@ -106,13 +125,48 @@ def build_session_days(
         grp = grp.sort_values("timestamp")
         w   = grp["_wall"].to_numpy(copy=True)
 
+        if placebo_mode not in ("real", "shift", "width"):
+            raise ValueError(
+                f"placebo_mode must be 'real', 'shift', or 'width'; got {placebo_mode!r}")
+
         rh_map, rl_map, rw_map = {}, {}, {}
+        rewm: dict[int, int] = {}   # populated for 'shift'; empty otherwise
+        highs_np = grp["high"].to_numpy()
+        lows_np  = grp["low"].to_numpy()
+        close_np = grp["close"].to_numpy()
+
         for rm in RANGE_MINUTES:
-            rng_mask = (w >= open_min) & (w < open_min + rm)
-            if rng_mask.sum() < rm:   # incomplete range — skip this range size
-                continue
-            rh = float(grp["high"].to_numpy()[rng_mask].max())
-            rl = float(grp["low"].to_numpy()[rng_mask].min())
+            if placebo_mode == "shift":
+                # Range window shifted SHIFT_OFFSET_MINUTES forward.
+                rng_start = open_min + SHIFT_OFFSET_MINUTES
+                rng_mask  = (w >= rng_start) & (w < rng_start + rm)
+                if rng_mask.sum() < rm:
+                    continue
+                rh = float(highs_np[rng_mask].max())
+                rl = float(lows_np[rng_mask].min())
+                # Detection must start after the shifted range, not after open+rm.
+                rewm[rm] = rng_start + rm
+
+            elif placebo_mode == "width":
+                # Same width as the real range, centred on the close at range-end.
+                rng_mask = (w >= open_min) & (w < open_min + rm)
+                if rng_mask.sum() < rm:
+                    continue
+                real_rh = float(highs_np[rng_mask].max())
+                real_rl = float(lows_np[rng_mask].min())
+                half_w  = (real_rh - real_rl) / 2.0
+                center  = float(close_np[rng_mask][-1])  # close of last range bar
+                rh = center + half_w
+                rl = center - half_w
+                # Detection starts at open_min+rm (same as real); rewm stays empty
+
+            else:  # "real" — unchanged production behaviour
+                rng_mask = (w >= open_min) & (w < open_min + rm)
+                if rng_mask.sum() < rm:   # incomplete range — skip this range size
+                    continue
+                rh = float(highs_np[rng_mask].max())
+                rl = float(lows_np[rng_mask].min())
+
             rh_map[rm] = rh
             rl_map[rm] = rl
             rw_map[rm] = round((rh - rl) / tick)
@@ -187,6 +241,7 @@ def build_session_days(
                          if "_source" in act_grp else None),
             bar_contracts=(act_grp["_contract"].to_numpy(copy=True)
                           if "_contract" in act_grp else None),
+            range_end_wall_mins=(rewm if rewm else None),
         ))
 
     log.info("%s %s: %d session-days", sym, session_name, len(days))
