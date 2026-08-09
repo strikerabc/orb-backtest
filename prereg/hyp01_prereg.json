@@ -1,0 +1,91 @@
+{
+  "hypothesis": "HYP-01",
+  "title": "The selection premium vs the friction floor",
+  "written_utc": "2026-08-08",
+  "written_before_any_result_was_computed": true,
+  "spec": "docs/HYP_01_FRICTION_PREMIUM.md",
+  "git_sha_at_prereg": "04443c1",
+
+  "claim": "Variant selection carries genuine, persistent out-of-sample discriminative power, but the friction floor sits above it. The project's failure is an execution-cost failure rather than a signal failure.",
+  "falsifiable_form": "survivor_holdout_mean - unconditional_holdout_mean <= 0",
+
+  "predicted_sign": "selection_premium > 0",
+  "predicted_magnitude_r": 0.03,
+  "kill_criterion": "premium CI includes zero -> selection is noise; close HYP-01/02/03",
+
+  "primary_statistic": "survivor_holdout_net_r - unconditional_holdout_net_r, family level, simple mean over families",
+  "null": "family-level bootstrap over holdout families, 20000 draws, seed 0",
+  "secondary": [
+    "the same premium in GROSS R, to separate signal from friction",
+    "the same premium under trade-weighting, reported separately and never mixed with the family-level figure",
+    "instrument-clustered bootstrap of the primary, as the robustness read"
+  ],
+
+  "estimator_discipline": {
+    "rule": "Both arms of any single comparison use the SAME estimator and the SAME period. A premium is only defined between like statistics.",
+    "why": "Review finding R1 was caused by pairing a trade-weighted point estimate with an unweighted interval. The review's own R3 then quotes the trade-weighted survivor figure (-0.0451) against a family-level population figure (~-0.0885) and reads the difference as a premium. That difference is contaminated by the estimator change: the survivor set's own family-level mean is -0.0962, so most of the apparent +0.04 gap is weighted-vs-unweighted, not survivor-vs-population. Pre-registering one estimator per comparison is what prevents repeating that error, and it is why the family-level simple mean is primary here -- selection operated per family, so the per-decision unit is the one the claim is about.",
+    "both_reported": true
+  },
+
+  "arms": {
+    "survivor": "The 94 families that were net-positive AND null_p < 0.05 in sample.",
+    "unconditional_all": "All rankable families (trade_count >= 100 in sample) that have at least one holdout trade, across all 21 rankable instrument-sessions. PRIMARY baseline: 'unconditional' means unconditional.",
+    "unconditional_matched": "The same, restricted to the 15 instrument-sessions that contain at least one survivor. SECONDARY.",
+    "why_both": "Selection chose instrument-sessions as well as families within them. The all-sessions baseline measures the total discrimination, including avoidance of expensive venues such as ETH TOK at 53.14 ticks of slippage. The matched baseline measures only within-session family discrimination. The difference between the two premiums isolates the instrument-session component, which matters because avoiding a costly venue is a real skill but not a signal claim.",
+    "nesting": "Survivors are a SUBSET of unconditional_all, so the arms overlap. This attenuates the measured premium by roughly the survivor share (94/976 ~ 9.6%). The survivors-vs-non-survivors contrast is also reported; it is disjoint and larger by construction. Both are computed from a single bootstrap draw so the positive correlation between arms is preserved."
+  },
+
+  "inclusion_rules": {
+    "in_sample_rankable": "trade_count >= 100 (MIN_TRADES_FOR_RANKING)",
+    "holdout_min_trades": 1,
+    "holdout_min_trades_sensitivity": 10,
+    "why": "The survivor arm currently keeps any family with >= 1 holdout trade (median 28). The baseline arm must use the identical rule or the comparison confounds selection with holdout sample size, since a baseline diluted by 1-trade families is noisier and its mean is pulled by outliers. The >= 10 variant is declared here as a sensitivity, not chosen after seeing the result.",
+    "family_collapse": "One row per family, at the rr with the highest in-sample expectancy_net_r. Identical to tools/holdout_test.py, so the survivor arm is comparable to the already-published figure.",
+    "holdout_period": "2026-02-01 onward, unbounded above. Note: this INCLUDES the 2026-07-25 -> 2026-08-07 paper-trading period, which is correct here because HYP-01 makes no use of that period's observations; it is only excluded when testing the event-regime hypothesis that period generated."
+  },
+
+  "secondary_test_3_2_gross_net_decomposition": {
+    "unit": "instrument x session",
+    "columns": ["n_trades", "E_gross_r", "mean_cost_r", "E_net_r", "cost_pct_of_abs_gross", "median_r_ticks", "slippage_ticks", "comm_ticks", "required_gross_r"],
+    "prediction": "cost_r varies by more than an order of magnitude across instrument-sessions, so the pooled expectancy describes no actual instrument.",
+    "kill_criterion": "none -- this is descriptive and cannot fail; it is reported because it does not exist anywhere in the repo"
+  },
+
+  "secondary_test_3_3_viability_frontier": {
+    "definition": "required_gross_r = cost_r = (slippage_ticks + comm_ticks) / r_ticks",
+    "test": "count instrument-sessions where the observed selection premium exceeds the friction floor",
+    "prediction_recorded_in_advance": "few; plausibly only ES/NY and ZN/NY",
+    "consequence_if_true": "the universe should shrink to those instrument-sessions and the sweep be re-run with the multiplicity budget recomputed for the smaller hypothesis space"
+  },
+
+  "secondary_test_3_4_friction_sensitivity": {
+    "multipliers": [0.5, 1.0, 2.0],
+    "applied_to": "slippage ticks only; commission is a known contractual quantity and is not scaled",
+    "why": "config records ETH/BTC slippage as sensitive and four instruments (GC, ZN, 6E, 6J) as provisional, with entry-timing weights derived from a pre-roll-fix trade log."
+  },
+
+  "also_resolves": {
+    "R2_baseline": "The holdout net-positive RATE of the unconditional arm replaces 'chance = 50%' in the verdict banner. R2 argues 36/94 is significantly worse than chance using a 0.5 null, which is the same wrong-baseline error R3 identifies one line above: if the population's holdout mean is negative, a random family is net-positive well under half the time. The measured population rate is the correct null and is reported here.",
+    "R2_clustering": "Already measured: clustering over 9 instruments inflates the rate sd by 1.43x and moves the binomial p from 0.023 to 0.113, with 6J alone contributing 1 of 18 net-positive. Recorded so the rate comparison is not read as independent evidence."
+  },
+
+  "power": {
+    "survivor_n_families": 94,
+    "assumed_family_sd_net_r": 0.15,
+    "implied_se_r": 0.015,
+    "detectable_at_0_04_r": "~2.6 sigma",
+    "reporting_rule": "report the CI, not a p-value",
+    "note": "The survivor arm's measured family-level sd is 0.2678, not the 0.15 assumed in the spec, so the true SE is larger and power correspondingly lower. Recorded before running so the discrepancy cannot be presented as a discovery afterwards."
+  },
+
+  "limitations_acknowledged_in_advance": [
+    "The holdout-period unconditional mean is computed on the same holdout as the survivor test. Only the DIFFERENCE is out of sample; the level is not.",
+    "Measured spread is a floor on execution cost and excludes market impact. A positive premium at measured cost may be negative at realised cost.",
+    "94 families are correlated through shared instruments and days. Bootstrap over families is the pre-registered primary; the instrument-clustered interval is reported alongside and is expected to be materially wider on only 9 clusters.",
+    "A positive premium licenses narrowing the universe and re-running with a recomputed multiplicity budget. It does not license trading."
+  ],
+
+  "analysis_tool": "tools/analysis/hyp01_friction_premium.py",
+  "no_new_data_required": true,
+  "spend_usd": 0.0
+}
