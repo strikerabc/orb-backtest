@@ -19,18 +19,38 @@ from src.contracts import DEFAULT_RT_COMMISSION_USD
 from src.filters import trade_eligibility
 
 
+def _wlo(v: dict) -> float:
+    """Lower bound of the interval belonging to the TRADE-WEIGHTED mean.
+
+    Falls back to the deprecated generic key so verdict files written before the
+    R1 fix still render. Note those older files carry the UNWEIGHTED interval under
+    that key -- the defect itself -- so a report regenerated from a stale
+    holdout_verdict.json reproduces the old mismatch. Re-run tools/holdout_test.py
+    to get a file with the named keys.
+    """
+    return float(v.get("holdout_weighted_ci_lo", v.get("holdout_ci_lo", float("nan"))))
+
+
+def _whi(v: dict) -> float:
+    return float(v.get("holdout_weighted_ci_hi", v.get("holdout_ci_hi", float("nan"))))
+
+
 def _verdict_banner(output_dir: Path) -> list[str]:
     """
     Lead the report with the out-of-sample verdict, if one exists.
 
     Without this the report opens with a Top-20 ranked by gross expectancy, and
     a reader would reasonably conclude those variants are good. They are
-    in-sample selection artefacts: the holdout test found the survivor set at or
-    below the multiple-comparisons chance rate and indistinguishable from a coin
-    flip out-of-sample.
+    in-sample selection artefacts: out of sample the survivor families are
+    net-positive well below half the time and their trade-weighted mean holdout
+    net R is significantly negative.
 
     Read from holdout_verdict.json rather than hardcoded so the report always
-    carries the LATEST holdout result instead of a stale claim.
+    carries the LATEST holdout result instead of a stale claim -- and note that
+    EVERY claim in the banner must be derived from that file for the mechanism to
+    work. This docstring itself previously asserted the survivor set was "at or
+    below the multiple-comparisons chance rate", which stopped being true at 94 of
+    976 families, and the banner heading carried the same stale text.
     """
     vpath = output_dir / "holdout_verdict.json"
     if not vpath.exists():
@@ -49,21 +69,36 @@ def _verdict_banner(output_dir: Path) -> list[str]:
     head = "## ⚠️ VERDICT: " + v.get("verdict", "unknown")
     lines = [head, ""]
 
+    # Both the count of supporting checks and check 1's heading are DERIVED, not
+    # asserted. They were hardcoded to "at or below the chance rate" / "two
+    # independent checks", which was true of an earlier sweep and silently became
+    # false when the survivor count rose to 94 of 976 (9.63% vs 5.0% expected) --
+    # the banner then stated the opposite of the numbers printed beside it. Same
+    # failure mode as the stale `n_fam_total = 1350` in holdout_test.py.
+    below = bool(v.get("below_chance_rate"))
     if is_null:
+        n_checks = "Two independent checks say so" if below else "The out-of-sample test says so"
         lines += [
             "**The ranked tables below are in-sample and are best read as "
-            "selection artefacts.** Two independent checks say so:",
+            f"selection artefacts.** {n_checks}:",
             "",
         ]
     lines += [
-        f"**1. In-sample survivors are at or below the chance rate.** "
-        f"{v['survivor_families']} of {v['families_rankable']:,} signal families "
+        (f"**1. In-sample survivors are at or below the chance rate.** "
+         if below else
+         f"**1. In-sample survivors are ABOVE the chance rate — but that alone "
+         f"does not identify which are real.** ")
+        + f"{v['survivor_families']} of {v['families_rankable']:,} signal families "
         f"were net-positive and `null_p < 0.05` "
         f"({v['survivor_pct_of_families']}%), against ~{v['expected_fp_at_5pct']} "
         f"expected from multiple comparisons alone at a 5% threshold "
         f"(5.0%). "
         + ("So the survivor set cannot be distinguished from noise before the "
-           "holdout is even consulted." if v.get("below_chance_rate") else ""),
+           "holdout is even consulted."
+           if below else
+           "An excess over the chance rate says some families are probably real; "
+           "it does not say WHICH, and it is not evidence that the top-ranked "
+           "ones are. Only the holdout addresses that."),
         "",
         f"**2. Out-of-sample ({v['holdout_start']} onward, never used for "
         f"selection).** Of {v['holdout_families_tested']} families, "
@@ -71,9 +106,33 @@ def _verdict_banner(output_dir: Path) -> list[str]:
         f"({v['holdout_net_positive_pct']}% — chance is 50%). "
         f"Trade-weighted mean holdout net R = "
         f"**{v['holdout_trade_weighted_net_r']:+.4f}**, bootstrap 95% CI "
-        f"[{v['holdout_ci_lo']:+.4f}, {v['holdout_ci_hi']:+.4f}]"
-        + (" — includes zero." if v.get("ci_includes_zero") else "."),
+        f"[{_wlo(v):+.4f}, {_whi(v):+.4f}]"
+        + (" — includes zero, so no edge is demonstrated."
+           if v.get("ci_includes_zero")
+           else " — which EXCLUDES zero. The survivor families do not merely fail "
+                "to profit out of sample; they lose reliably, which is a stronger "
+                "statement than 'no edge'."),
         "",
+    ]
+
+    # The simple mean is reported alongside because the two answer different
+    # questions, and their DIVERGENCE is itself a finding: low-trade-count families
+    # gave back more, as the winner's curse predicts. Appended conditionally so a
+    # pre-R1-fix verdict file (which lacks the named keys) renders without a gap.
+    if "holdout_simple_ci_lo" in v:
+        lines += [
+            f"Simple mean across families = "
+            f"**{v['holdout_simple_mean_net_r']:+.4f}**, CI "
+            f"[{v['holdout_simple_ci_lo']:+.4f}, {v['holdout_simple_ci_hi']:+.4f}]. "
+            f"The trade-weighted figure is per-trade expectancy; the simple mean is "
+            f"whether the typical selection decision held up. They diverge by "
+            f"{v['holdout_trade_weighted_net_r'] - v['holdout_simple_mean_net_r']:+.4f}"
+            f" R because families with fewer holdout trades did worse — they were "
+            f"selected on noisier in-sample estimates.",
+            "",
+        ]
+
+    lines += [
         f"Variant counts overstate findings ~1.9x: all six RR levels of one "
         f"entry signal share the same entries and differ only in exit "
         f"placement, so {v['survivor_variants']} \"variants\" are "
