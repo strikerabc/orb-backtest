@@ -36,14 +36,46 @@ class RegimeWindow:
         return f"W{self.index:02d}  {self.start}→{self.end}"
 
 
-def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
+def assert_windows_within_data(windows: list[RegimeWindow], data_end: date,
+                               label: str | None = None) -> None:
+    """Every fitted window must lie inside the data it was fitted on.
+
+    Independent of the holdout-boundary check in select_windows, which compares
+    windows against eligible_end -- a value config can supply via HOLDOUT_PIN_START.
+    If that value is wrong the boundary check validates windows against a fiction and
+    passes. This compares against data_end, which is measured from the loaded data
+    and cannot be asserted by config, so it holds even when the pin is nonsense.
+
+    Currently unreachable through select_windows: the pin guard rejects
+    pin >= data_end earlier, and unpinned runs derive eligible_end as
+    data_end - HOLDOUT_MONTHS, which is strictly before data_end. It is kept as
+    defence in depth and exposed as a named function so the invariant is testable
+    directly -- asserting it through a reimplementation in the test would pass even
+    if this check were deleted.
+    """
+    who = f"[{label}] " if label else ""
+    outside = [w for w in windows if w.end > data_end]
+    if outside:
+        raise AssertionError(
+            f"{who}Fitted window(s) extend past data_end {data_end}: "
+            + ", ".join(f"W{w.index:02d} {w.start}->{w.end}" for w in outside)
+            + ". Those windows are fitted on data that does not exist.")
+
+
+def select_windows(data_start: date, data_end: date,
+                   label: str | None = None) -> list[RegimeWindow]:
     """
     Given the span of available data, return N_REGIMES non-overlapping
     REGIME_WINDOW_MONTHS-month windows with even temporal spread.
 
     data_start, data_end: first and last trading dates available.
+    label: optional caller identity (normally the symbol) used only in error text.
+        This runs PER SYMBOL with that symbol's own data_end, so a pin can be valid
+        for nine instruments and invalid for the tenth. Without the label that
+        failure reports a bare date range and does not say which symbol produced it.
     """
     rng = np.random.default_rng(REGIME_SEED)
+    who = f"[{label}] " if label else ""
 
     # Exclude holdout from the end.
     #
@@ -54,8 +86,29 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     # boundary. None preserves the sliding default exactly.
     if HOLDOUT_PIN_START is not None:
         eligible_end = pd.Timestamp(HOLDOUT_PIN_START).date()
-        log.info("Holdout PINNED at %s (data_end=%s); sliding cutoff would have "
-                 "been %s", eligible_end, data_end,
+        # A pin is an ASSERTION about data that must already be loaded, so it has to
+        # be checked against that data. Unvalidated, a pin at or after data_end
+        # produced no holdout region at all and said nothing: windows were fitted
+        # right up to the pin, the breach guard below compared them against the pin
+        # itself and passed, and W09 landed beyond data_end entirely (verified:
+        # pin 2027-01-01 with data_end 2026-04-30 placed W09 at 2026-04-01->2026-09-30).
+        # Every downstream holdout read then covers an empty slice while every
+        # artifact still claims an out-of-sample test was performed.
+        #
+        # Latent rather than live at the time of writing: the configured pin
+        # 2026-02-01 sits 3-6 months before data_end for all 18 cached files. It
+        # becomes live the moment a symbol's cache is rebuilt short, which is exactly
+        # the ragged-cache scenario the pin exists to defend against.
+        if eligible_end >= data_end:
+            raise ValueError(
+                f"{who}HOLDOUT_PIN_START={eligible_end} is at or after data_end "
+                f"{data_end}, so no holdout region exists. Fitted windows would be "
+                f"placed against a boundary outside the loaded data and the "
+                f"out-of-sample test would silently cover nothing. Either load data "
+                f"past {eligible_end} or set config.HOLDOUT_PIN_START to a date "
+                f"before {data_end} (None restores the sliding boundary).")
+        log.info("%sHoldout PINNED at %s (data_end=%s); sliding cutoff would have "
+                 "been %s", who, eligible_end, data_end,
                  pd.Timestamp(data_end - pd.DateOffset(months=HOLDOUT_MONTHS)).date())
     else:
         holdout_cutoff = data_end - pd.DateOffset(months=HOLDOUT_MONTHS)
@@ -92,9 +145,21 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
         first_month.to_period("M"), last_month, freq="M")))
     realised_n = min(N_REGIMES, eligible_months // REGIME_WINDOW_MONTHS)
     if realised_n < N_REGIMES:
-        log.warning("History supports %d non-overlapping windows, requested %d",
-                    realised_n, N_REGIMES)
+        log.warning("%sHistory supports %d non-overlapping windows, requested %d",
+                    who, realised_n, N_REGIMES)
     if realised_n == 0:
+        # Genuinely-short history returning [] is legitimate (a symbol with a late
+        # data_start simply has nowhere to fit windows). A PIN causing it is not: the
+        # pin is a deliberate assertion, and silently producing zero fitted windows
+        # means every variant for this symbol is scored on no data while the run
+        # still reports success.
+        if HOLDOUT_PIN_START is not None:
+            raise ValueError(
+                f"{who}HOLDOUT_PIN_START={eligible_end} leaves only "
+                f"{eligible_months} usable month(s) after data_start {data_start}, "
+                f"which fits zero {REGIME_WINDOW_MONTHS}-month windows. At least "
+                f"{REGIME_WINDOW_MONTHS} are needed. Move the pin later or set it "
+                f"to None.")
         return []
 
     # Spread spare months almost evenly across the n+1 gaps. Randomly assign
@@ -126,8 +191,10 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     breaches = [w for w in windows if w.end >= eligible_end]
     if breaches:
         raise AssertionError(
-            f"Fitted window(s) cross the holdout boundary {eligible_end}: "
+            f"{who}Fitted window(s) cross the holdout boundary {eligible_end}: "
             + ", ".join(f"W{w.index:02d} {w.start}->{w.end}" for w in breaches))
+
+    assert_windows_within_data(windows, data_end, label=label)
 
     for w in windows:
         log.info("Regime window: %s", w)

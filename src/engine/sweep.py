@@ -113,7 +113,8 @@ def _load_symbol_context(sym: str) -> tuple[dict[str, list[SessionDay]], dict[in
     df_1m = ensure_data(sym)
     df_1d = ensure_daily(sym)
     df = _compute_enrichment(df_1m, df_1d, tick_size=INSTRUMENTS[sym]["tick_size"])
-    windows = select_windows(df["timestamp"].min().date(), df["timestamp"].max().date())
+    windows = select_windows(df["timestamp"].min().date(),
+                             df["timestamp"].max().date(), label=sym)
     by_session: dict[str, list[SessionDay]] = {}
     for sess in INSTRUMENTS[sym].get("sessions", list(SESSIONS)):
         days: list[SessionDay] = []
