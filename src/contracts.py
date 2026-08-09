@@ -66,10 +66,43 @@ SPOT_FX_RT_PER_100K_USD = 7.00
 SPOT_FX_LEVERAGE = 50
 
 
-def comm_ticks(sym: str, kind: str) -> float:
-    """Round-trip commission expressed in ticks."""
-    c = CONTRACTS[sym][kind]
-    return c["rt_commission_usd"] / c["tick_value_usd"]
+def comm_ticks(sym: str, kind: str = "full") -> float:
+    """Round-trip commission expressed in ticks.
+
+    CONTRACTS covers only the four instruments that have a micro counterpart
+    (ES/MES, NQ/MNQ, CL/MCL, 6E/M6E), because micro sizing is what it exists for.
+    That is correct for ``kind="micro"``: RTY, GC, ZN, BTC, ETH and 6J genuinely have
+    no micro contract, so asking for one is an error and must raise.
+
+    It is NOT correct for ``kind="full"``. Every instrument has a full-size contract,
+    and this raised KeyError for six of the ten -- while
+    ``round_trip_commission_usd`` right below it handles exactly the same gap with a
+    .get() chain and a DEFAULT_RT_COMMISSION_USD fallback. Two accessors over one
+    table disagreeing about whether a missing entry is fatal is the defect; the live
+    sweep only escaped it because trade_sim._round_cost_r calls the safe one.
+
+    The fallback reproduces what the sweep actually charges:
+        DEFAULT_RT_COMMISSION_USD / INSTRUMENTS[sym]["tick_value_usd"]
+    which is trade_sim's own expression. For the four instruments present in both
+    tables the tick values are identical, so this returns the same number it always
+    did for them -- verified, not assumed.
+    """
+    spec = CONTRACTS.get(sym, {}).get(kind)
+    if spec is not None:
+        return spec["rt_commission_usd"] / spec["tick_value_usd"]
+
+    if kind != "full":
+        available = sorted(k for k, v in CONTRACTS.items() if kind in v)
+        raise KeyError(
+            f"{sym!r} has no {kind!r} contract. Instruments with a {kind!r} "
+            f"contract: {available}. Every instrument has a 'full' contract, so "
+            f"comm_ticks({sym!r}, 'full') is always valid.")
+
+    from .config import INSTRUMENTS
+
+    if sym not in INSTRUMENTS:
+        raise KeyError(f"unknown instrument {sym!r}; not in CONTRACTS or INSTRUMENTS")
+    return DEFAULT_RT_COMMISSION_USD / INSTRUMENTS[sym]["tick_value_usd"]
 
 
 def round_trip_commission_usd(sym: str, kind: str = "full") -> float:
