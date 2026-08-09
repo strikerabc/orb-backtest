@@ -1,0 +1,34 @@
+{
+  "_doc": "HYP-05 closure record. Gate condition failed: HYP-03 SHIFT and WIDTH placebos match the real range on trigger rate.",
+  "hypothesis": "HYP-05",
+  "status": "CLOSED UNRUN",
+  "closed_by": "HYP-03 gate failure",
+  "gate_condition": "HYP-03 SHIFT and WIDTH must not match the real range on trigger rate or gross expectancy",
+  "gate_result": "FAILED — neither SHIFT nor WIDTH differs significantly from real (all Holm-adjusted p = 1.000)",
+  "width_result": "Δ = 0.00pp for every one of 25 instrument-sessions. Same-width band at different location fires on identical days.",
+  "shift_result": "Mixed — no pattern of real > shift. BTC/TOK -19.0pp and ETH/TOK -26.2pp show shifted window MORE active (wrong direction for gate). None significant after Holm.",
+  "rationale": "Characterising instrument heterogeneity in a signal that does not exist (level not special) is not informative. The cross-sectional programme closes.",
+  "outstanding_items": {
+    "trade_count_400_conditioner": {
+      "status": "DEFERRED — requires fresh out-of-sample data not yet collected",
+      "reason": "The in-sample scan touched the holdout; that data is spent. Needs a new holdout slice (extend cache or wait for calendar time).",
+      "known_result": "premium +0.0496 R, monotone, survives clustered bootstrap at n>=400 threshold — exploratory only until separately confirmed OOS"
+    },
+    "rotate_placebo": {
+      "status": "DEFERRED — IMPROVEMENTS §6.8 not yet implemented",
+      "reason": "ROTATE would address path-shape question after trigger, not trigger rate. Not warranted given WIDTH = 0pp result."
+    },
+    "universe_expansion": {
+      "status": "MOOT given gate failure",
+      "note": "More instruments raise the cross-sectional precision floor but there is no signal to characterise. Cost estimate skipped."
+    }
+  },
+  "hyp01_through_hyp04_summary": {
+    "HYP-01": "FALSIFIED — selection premium CI includes zero; 0/21 instrument-sessions clear friction floor",
+    "HYP-02": "CLOSED UNRUN — gross expectancy negative before inversion; no edge to invert",
+    "HYP-03": "CLOSED — level fires same as placebo (WIDTH=0pp all sessions, SHIFT mixed/non-significant)",
+    "HYP-04a": "FALSIFIED — range_quality uncorrelated with holdout R (rho CI includes zero)",
+    "HYP-04b": "SURVIVES in-sample; holdout CI includes zero — no confirmation",
+    "HYP-05": "CLOSED UNRUN (this document)"
+  }
+}
