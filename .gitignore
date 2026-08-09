@@ -8,6 +8,18 @@ runs/
 *.env
 secrets.py
 *_api_key*
+# The patterns above miss the obvious case: *_api_key* requires the literal
+# substring "api_key", so a file named databento_key.txt is NOT ignored. A live
+# Databento credential sat in the working tree unignored, one `git add -A` away
+# from being committed. Broadened to the conventional key/token/credential names.
+*_key.txt
+*_key.json
+*_secret*
+*_token.txt
+*.key
+*.pem
+credentials.json
+databento_key.txt
 
 # Python
 __pycache__/
