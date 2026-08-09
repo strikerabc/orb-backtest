@@ -71,7 +71,22 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     first_month = pd.Timestamp(data_start) + pd.offsets.MonthBegin(0)
     if first_month.date() < data_start:
         first_month += pd.offsets.MonthBegin(1)
-    eligible_months = len(pd.period_range(first_month, eligible_end, freq="M"))
+
+    # Count only months that end STRICTLY BEFORE eligible_end.
+    #
+    # The previous form was len(period_range(first_month, eligible_end, freq="M")),
+    # which counts the boundary month as fully usable. With eligible_end
+    # 2026-02-01 that credited all of February, so ETH -- data_start 2021-02-08,
+    # exactly 10 windows in 61 counted months, zero slack -- placed W9 at
+    # 2025-09-01 -> 2026-02-28, crossing the holdout boundary by 27 days and
+    # putting 6,168 fitted trades inside the holdout region.
+    #
+    # Window ends are start + REGIME_WINDOW_MONTHS - 1 day and were never clamped
+    # against eligible_end, and the only post-hoc check was for mutual overlap.
+    # A window may share the boundary month only if it ends before the boundary.
+    last_month = (pd.Timestamp(eligible_end) - pd.Timedelta(days=1)).to_period("M")
+    eligible_months = len(pd.period_range(
+        first_month.to_period("M"), last_month, freq="M"))
     realised_n = min(N_REGIMES, eligible_months // REGIME_WINDOW_MONTHS)
     if realised_n < N_REGIMES:
         log.warning("History supports %d non-overlapping windows, requested %d",
@@ -100,6 +115,15 @@ def select_windows(data_start: date, data_end: date) -> list[RegimeWindow]:
     ordered = sorted(windows, key=lambda w: w.start)
     if any(a.end >= b.start for a, b in zip(ordered, ordered[1:])):
         raise AssertionError("Regime windows overlap")
+
+    # The guard that was missing. Overlap was checked; crossing the holdout was
+    # not, so a fitted window could leak into the out-of-sample region silently
+    # and the only symptom was holdout-dated rows in the trade log.
+    breaches = [w for w in windows if w.end >= eligible_end]
+    if breaches:
+        raise AssertionError(
+            f"Fitted window(s) cross the holdout boundary {eligible_end}: "
+            + ", ".join(f"W{w.index:02d} {w.start}->{w.end}" for w in breaches))
 
     for w in windows:
         log.info("Regime window: %s", w)

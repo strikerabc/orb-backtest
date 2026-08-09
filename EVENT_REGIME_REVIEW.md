@@ -612,10 +612,56 @@ Fixed via `HOLDOUT_PIN_START = "2026-02-01"` in `config.py`, honoured in
 | pinned, `data_end` 2026-08-07 | 10 | 2025-12-31 — **bit-identical** |
 | **unpinned**, `data_end` 2026-08-07 | 10 | **2026-03-31** — old holdout absorbed |
 
-Net effect: the 2026-02-01 → 04-30 holdout that produced `NO EDGE ESTABLISHED` stays
-fixed and comparable, and **May 1 → Jul 24 becomes a second independent OOS window**
-(~59 trading days, free). Jul 25 → Aug 7 remains observation-origin and is barred
-from confirmatory use.
+Net effect: the 2026-02-01 boundary is fixed, so the out-of-sample region is now
+**2026-02-01 → 2026-08-07** — roughly six months rather than three, since the pin stops
+the fitted windows advancing into the newly added data. Jul 25 → Aug 7 remains
+observation-origin and is barred from confirmatory use, leaving **2026-02-01 → 2026-07-24**
+usable for confirmation.
+
+**Correction, and it was two errors in one sentence.** I previously wrote that
+"May 1 → Jul 24 becomes a second independent OOS window (~59 trading days)" and then
+checked for it in `trade_log.parquet`, where it is empty. Both halves were wrong:
+
+1. **Wrong artifact.** `test_holdout.py` is a separate script — `HOLDOUT_START` is
+   hardcoded at line 74, it filters `timestamp >= HOLDOUT_START` at line 141, and calls
+   `build_session_days` directly at line 148. Holdout trades are never written to the
+   trade log, which by construction contains **only fitted-window trades**. No sweep
+   configuration would ever have put an OOS window there.
+2. **Not a *second* window.** With the pin, 2026-02-01 → 08-07 is one continuous OOS
+   region, not the old holdout plus a new slice. Calling it "second" implied the
+   original 3-month holdout was still separately bounded, which the pin makes untrue.
+
+### J2b. The pin had a bug — mine — and no guard caught it
+
+The first pinned run put **6,168 ETH trades inside the holdout region** (trade log
+running to 2026-02-26, past the 2026-02-01 pin). Cause, in `select_windows`:
+
+- `eligible_months` was `len(period_range(first_month, eligible_end, freq="M"))`, which
+  counts the **boundary month as fully usable**. With `eligible_end = 2026-02-01` that
+  credited all of February.
+- Window ends are `start + REGIME_WINDOW_MONTHS − 1 day` and were **never clamped**
+  against `eligible_end`.
+- The only post-hoc assertion checked windows for **mutual overlap**, not for crossing
+  the holdout.
+
+ETH is where it surfaced because `data_start = 2021-02-08` gives it exactly 10 windows
+in 61 counted months with **zero slack**, so W9 landed at 2025-09-01 → **2026-02-28**.
+Every other instrument had spare months absorbing the miscount. A bug that only fires
+on the one instrument with no slack, with no assertion covering it, is the kind that
+survives indefinitely.
+
+Fixed by counting only months ending strictly before `eligible_end`, and adding the
+missing guard that raises if any fitted window satisfies `w.end >= eligible_end`.
+Verified zero breaches across all ten instruments. Two honest consequences:
+
+- **ETH now yields 9 windows, not 10**, with `History supports 9 non-overlapping
+  windows, requested 10`. That is the correct answer — ETH genuinely lacks 60 clean
+  eligible months before the pin, and previously reached 10 only by borrowing 27 days
+  of holdout.
+- **W9 moves 2025-12-31 → 2025-10-31 for the other nine**, because dropping the
+  miscounted month reduces `spare` and redistributes the gaps.
+
+Windows changed again, so checkpoints were invalidated and the sweep was re-run cold.
 
 **Correction to an earlier claim in this document.** I previously wrote that the pin
 reproduces "what the baseline actually ran." That holds for **ES/NQ only**. It is wrong
