@@ -1,0 +1,151 @@
+{
+  "provider": "Alpha Funded",
+  "forex_challenges": {
+    "1step_lite": {
+      "phase1": {
+        "balance": [10000, 25000, 50000, 100000, 200000, 300000, 400000],
+        "profit_target_pct": 10.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 3.0,
+        "min_trading_days": 3,
+        "time_limit": "unlimited"
+      },
+      "funded": {
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 3.0,
+        "min_trading_days": 3,
+        "consistency_pct": null,
+        "profit_split": 100.0
+      }
+    },
+    "1step_pro": {
+      "phase1": {
+        "balance": [10000, 25000, 50000, 100000, 200000, 300000, 400000],
+        "profit_target_pct": 8.0,
+        "max_loss_pct": 6.0,
+        "daily_loss_pct": 3.0,
+        "min_trading_days": 5,
+        "time_limit": "unlimited"
+      },
+      "funded": {
+        "max_loss_pct": 6.0,
+        "daily_loss_pct": 3.0,
+        "min_trading_days": 0,
+        "consistency_pct": 35.0,
+        "profit_split": 100.0
+      }
+    },
+    "2step_standard": {
+      "phase1": {
+        "balance": [10000, 25000, 50000, 100000, 200000, 300000, 400000],
+        "profit_target_pct": 10.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "min_trading_days": 3,
+        "time_limit": "unlimited"
+      },
+      "phase2": {
+        "profit_target_pct": 5.0,
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "min_trading_days": 3,
+        "time_limit": "unlimited"
+      },
+      "funded": {
+        "max_loss_pct": 10.0,
+        "daily_loss_pct": 5.0,
+        "floating_pnl_pct": 3.0,
+        "min_trading_days": 3,
+        "consistency_pct": null,
+        "profit_split": 100.0
+      }
+    },
+    "2step_pro": {
+      "phase1": {
+        "balance": [10000, 25000, 50000, 100000, 200000, 300000, 400000],
+        "profit_target_pct": 8.0,
+        "max_loss_pct": 5.0,
+        "daily_loss_pct": 3.0,
+        "min_trading_days": 2,
+        "time_limit": "unlimited"
+      },
+      "phase2": {
+        "profit_target_pct": 4.0,
+        "max_loss_pct": 5.0,
+        "daily_loss_pct": 3.0,
+        "min_trading_days": 2,
+        "time_limit": "unlimited"
+      },
+      "funded": {
+        "max_loss_pct": 5.0,
+        "daily_loss_pct": 3.0,
+        "min_trading_days": 2,
+        "consistency_pct": null,
+        "profit_split": 80.0
+      }
+    },
+    "instant_funding": {
+      "funded": {
+        "balance": [10000, 25000, 50000, 100000, 200000, 300000, 400000],
+        "max_loss_pct": 5.0,
+        "daily_loss_pct": 3.0,
+        "floating_pnl_pct": 1.0,
+        "min_trading_days": 5,
+        "consistency_pct": 20.0,
+        "profit_split": 90.0,
+        "safety_cushion_pct": 3.0
+      }
+    },
+    "instant_funding_pro": {
+      "funded": {
+        "balance": [10000, 25000, 50000, 100000, 200000, 300000, 400000],
+        "max_loss_pct": 5.0,
+        "daily_loss_pct": 3.0,
+        "floating_pnl_pct": 1.0,
+        "min_trading_days": 10,
+        "consistency_pct": null,
+        "profit_split": 90.0,
+        "safety_cushion_pct": 3.0
+      }
+    }
+  },
+  "futures_challenges": {
+    "1step_flex": {
+      "phase1": {
+        "balance": [50000, 100000, 150000],
+        "profit_target_usd": [3000, 6000, 9000],
+        "max_loss_usd": [1500, 3000, 4500],
+        "max_contracts": [5, 10, 15],
+        "consistency_pct": 40.0,
+        "min_trading_days": 5,
+        "time_limit": "unlimited"
+      },
+      "funded": {
+        "max_loss_usd": [1500, 3000, 4500],
+        "max_contracts": [5, 10, 15],
+        "consistency_pct": null,
+        "min_trading_days": 5,
+        "profit_split": 90.0
+      }
+    },
+    "instant_funding": {
+      "funded": {
+        "balance": [50000, 100000, 150000],
+        "max_loss_usd": [1500, 3000, 4500],
+        "floating_pnl_usd": [500, 1000, 1500],
+        "max_contracts": [5, 10, 15],
+        "consistency_pct": 20.0,
+        "profit_split": 90.0,
+        "safety_net_usd": [1500, 3000, 4500]
+      }
+    }
+  },
+  "notes": {
+    "drawdown_type": "trailing for all forex challenges, static max loss for futures",
+    "time_limits": "all challenges have unlimited time once min trading days are met",
+    "consistency_formula": "(Highest Single-Day Profit / Lifetime Realized Profit) × 100",
+    "floating_pnl": "real-time open loss limit, not end-of-day",
+    "safety_cushion": "first 3% profit cannot be withdrawn on large instant accounts ($300k+)",
+    "scaling": "all funded accounts can scale up to $4M over time"
+  }
+}
