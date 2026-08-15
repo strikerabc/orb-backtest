@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 strategy("ORB ATR Trailing Stop [AlphaFunded]",
          overlay=true,
          initial_capital=10000,
@@ -123,6 +123,7 @@ var float entry_price = na
 var float stop_price = na
 var float target_price = na
 var float risk_dollars = na
+var float position_size = na  // Declare as var so it persists across bars
 
 if signal_long or signal_short
     is_long = signal_long
@@ -141,7 +142,7 @@ if signal_long or signal_short
 
     // Position size: risk_dollars / (stop_distance * 1)
     // Expressed as NAS100 lots (where 1 lot = 100 bundles)
-    position_size = risk_dollars / (stop_distance * 100)
+    position_size := risk_dollars / (stop_distance * 100)
 
     // Target: 1.0R from entry
     target_price := is_long ? entry_price + base_rr_target * stop_distance : entry_price - base_rr_target * stop_distance
