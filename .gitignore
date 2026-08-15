@@ -1,54 +1,79 @@
-# ── Generated data and artifacts ────────────────────────────────────────────
-# Large parquet caches and run outputs. Regenerable, and far too big for git.
-data/*
-outputs/
-runs/
+# Gitignore for ORB Backtest System
 
-# ...but the event calendar is a VERSIONED INPUT, not a cache. A p-value computed
-# against a calendar that shifts between runs is not a p-value, so it is tracked.
-!data/events/
-
-# Committed evidence: pre-registrations, gate results, pinned baseline hashes.
-# These are small JSON and MUST be in history -- a pre-registration that is not in
-# version control has no evidential value, since it could be edited after seeing
-# results. The generated artifacts they describe stay ignored.
-!prereg/
-
-# ── Credentials — NEVER commit ──────────────────────────────────────────────
+# Secrets and credentials
 .env
-*.env
-secrets.py
-*_api_key*
-# The patterns above miss the obvious case: *_api_key* requires the literal
-# substring "api_key", so a file named databento_key.txt is NOT ignored. A live
-# Databento credential sat in the working tree unignored, one `git add -A` away
-# from being committed. Broadened to the conventional key/token/credential names.
-*_key.txt
-*_key.json
-*_secret*
-*_token.txt
+.env.local
 *.key
 *.pem
 credentials.json
-databento_key.txt
+secrets/
 
-# ── Python ──────────────────────────────────────────────────────────────────
+# Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.so
-.venv/
+.Python
+env/
 venv/
-*.egg-info/
-dist/
+ENV/
 build/
-.pytest_cache/
-.coverage
-htmlcov/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# ── OS ─────────────────────────────────────────────────────────────────────
+# Logs
+logs/
+*.log
+
+# Trading data
+data/cache/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
 Thumbs.db
 
-# ── Local working notes ────────────────────────────────────────────────────
-# Reviewer scratch, not part of the repo's documented state.
-docs/IMPROVEMENTS.md
+# Jupyter
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.bak
+temp/
+tmp/
+
+# Output files (keep structure, ignore data)
+outputs/*
+runs/*
+!outputs/README.md
+!outputs/.gitkeep
+
+# Historical market data (large files, regenerable via databento)
+data/*.parquet
+data/*.csv
+data/*.json
+data/_backup_*/
+data/spreads/
+!data/README.md
+!data/.gitkeep
