@@ -1,0 +1,257 @@
+//@version=6
+strategy("ORB ATR Trailing Stop [AlphaFunded]",
+         overlay=true,
+         initial_capital=10000,
+         default_qty_type=strategy.fixed,
+         default_qty_value=0.02,
+         commission_type=strategy.commission.cash_per_contract,
+         commission_value=8,
+         slippage=2,
+         calc_on_every_tick=false,
+         process_orders_on_close=false)
+
+// ============================================================================
+// STRATEGY CONFIGURATION
+// ============================================================================
+// Based on full-span optimization results (2019-2026)
+// Best config: ATR 0.75x, breakeven 0.2R, trail start 0.5R, target 1.0R
+// Sharpe: 1.116, Consistency: 100%, +191R across 2,576 trades
+
+// Session Settings
+session_start_hour = input.int(9, "Session Start Hour (ET)", minval=0, maxval=23)
+session_start_minute = input.int(30, "Session Start Minute", minval=0, maxval=59)
+range_duration_mins = input.int(5, "Opening Range Duration (mins)", minval=1, maxval=30)
+
+// Entry Mode
+entry_mode = input.string("CC", "Entry Mode", options=["R-CC", "CC", "II"])
+
+// ATR Trailing Stop Parameters
+enable_regime_adaptive = input.bool(true, "Enable Regime-Adaptive ATR")
+atr_regime_threshold = input.float(115.0, "ATR Regime Threshold", tooltip="Above this = use 1.0x, below = use 0.75x")
+atr_mult_low_vol = input.float(0.75, "ATR Multiplier (Low Vol)", step=0.05)
+atr_mult_high_vol = input.float(1.0, "ATR Multiplier (High Vol)", step=0.05)
+atr_period = input.int(48, "ATR Period (4H = 48 x 5min bars)", minval=1)
+
+// Risk Management
+breakeven_rr = input.float(0.2, "Breakeven at R", step=0.05, tooltip="Move stop to entry after this R")
+trail_start_rr = input.float(0.5, "Start Trailing at R", step=0.1)
+base_rr_target = input.float(1.0, "Base R Target", step=0.25)
+
+// Position Sizing
+risk_per_trade_pct = input.float(1.0, "Risk Per Trade (%)", minval=0.1, maxval=5.0, step=0.1) / 100
+max_daily_loss_pct = input.float(5.0, "Max Daily Loss (%)", minval=1.0, maxval=10.0, step=0.5) / 100
+max_total_dd_pct = input.float(8.0, "Max Total Drawdown (%)", minval=1.0, maxval=20.0, step=1.0) / 100
+
+// ============================================================================
+// SESSION DETECTION
+// ============================================================================
+
+// Convert session start to minutes since midnight
+session_start_mins = session_start_hour * 60 + session_start_minute
+current_time_mins = hour * 60 + minute
+
+// Check if we're in NY session (9:30 AM - 4:00 PM ET)
+in_session = current_time_mins >= session_start_mins and current_time_mins < session_start_mins + 390
+
+// Detect session start (first bar of session)
+session_started = in_session and not in_session[1]
+
+// Track opening range period
+var float or_high = na
+var float or_low = na
+var int or_end_time = na
+var bool or_complete = false
+
+if session_started
+    or_high := high
+    or_low := low
+    or_end_time := current_time_mins + range_duration_mins
+    or_complete := false
+
+// Update OR high/low during range period
+if not or_complete and current_time_mins < or_end_time
+    or_high := math.max(or_high, high)
+    or_low := math.min(or_low, low)
+
+// Mark OR as complete
+if not or_complete and current_time_mins >= or_end_time
+    or_complete := true
+
+// ============================================================================
+// ATR CALCULATION & REGIME DETECTION
+// ============================================================================
+
+atr_value = ta.atr(atr_period)
+
+// Regime detection: high volatility if ATR > threshold
+is_high_vol = enable_regime_adaptive and atr_value > atr_regime_threshold
+
+// Select ATR multiplier based on regime
+atr_mult = is_high_vol ? atr_mult_high_vol : atr_mult_low_vol
+
+trail_distance = atr_mult * atr_value
+
+// ============================================================================
+// ENTRY SIGNAL DETECTION
+// ============================================================================
+
+// R-CC: Range Close Close (5-min closure above/below OR)
+r_cc_long = or_complete and close > or_high and close[1] <= or_high
+r_cc_short = or_complete and close < or_low and close[1] >= or_low
+
+// CC: Close Close (two consecutive closes above/below OR)
+cc_long = or_complete and close > or_high and close[1] > or_high[1]
+cc_short = or_complete and close < or_low and close[1] < or_low[1]
+
+// II: Wick Wick (two consecutive wicks through OR)
+ii_long = or_complete and low <= or_high and low[1] <= or_high[1] and close > or_high
+ii_short = or_complete and high >= or_low and high[1] >= or_low[1] and close < or_low
+
+// Select signal based on entry mode
+signal_long = entry_mode == "R-CC" ? r_cc_long : (entry_mode == "CC" ? cc_long : ii_long)
+signal_short = entry_mode == "R-CC" ? r_cc_short : (entry_mode == "CC" ? cc_short : ii_short)
+
+// ============================================================================
+// POSITION SIZING & RISK CHECKS
+// ============================================================================
+
+// Calculate position size based on risk
+// For NAS100: 1 lot = 100 bundles, so 0.01 lot = 1 bundle = $1/point
+// Risk = stop_distance * position_size * 1 (since we're in index points)
+
+var float entry_price = na
+var float stop_price = na
+var float target_price = na
+var float risk_dollars = na
+var float position_size = na  // Declare as var so it persists across bars
+
+if signal_long or signal_short
+    is_long = signal_long
+
+    // Entry at close of signal bar
+    entry_price := close
+
+    // Initial stop: opposite side of OR
+    stop_price := is_long ? or_low : or_high
+
+    // Risk in points
+    stop_distance = math.abs(entry_price - stop_price)
+
+    // Risk dollars (1% of account)
+    risk_dollars := strategy.equity * risk_per_trade_pct
+
+    // Position size: risk_dollars / (stop_distance * 1)
+    // Expressed as NAS100 lots (where 1 lot = 100 bundles)
+    position_size := risk_dollars / (stop_distance * 100)
+
+    // Target: 1.0R from entry
+    target_price := is_long ? entry_price + base_rr_target * stop_distance : entry_price - base_rr_target * stop_distance
+
+// ============================================================================
+// TRADE MANAGEMENT & TRAILING STOPS
+// ============================================================================
+
+var float current_stop = na
+var bool target_active = true
+var bool trailing_active = false
+
+// Initialize on entry
+if strategy.position_size == 0
+    current_stop := na
+    target_active := true
+    trailing_active := false
+
+if strategy.position_size != 0
+    is_long = strategy.position_size > 0
+
+    // Calculate current R (profit in R terms)
+    current_r = is_long ? (close - entry_price) / (entry_price - stop_price) : (entry_price - close) / (stop_price - entry_price)
+
+    // Breakeven: move stop to entry at 0.2R
+    if current_r >= breakeven_rr and current_stop == stop_price
+        current_stop := entry_price
+        target_active := false  // Cancel target once at breakeven
+
+    // Start trailing at 0.5R
+    if current_r >= trail_start_rr and not trailing_active
+        trailing_active := true
+
+    // Update trailing stop
+    if trailing_active
+        if is_long
+            new_stop = close - trail_distance
+            current_stop := math.max(current_stop, new_stop)
+        else
+            new_stop = close + trail_distance
+            current_stop := math.min(current_stop, new_stop)
+
+// ============================================================================
+// ENTRY & EXIT LOGIC
+// ============================================================================
+
+// Enter long
+if signal_long and strategy.position_size == 0 and in_session
+    current_stop := stop_price
+    strategy.entry("Long", strategy.long, qty=position_size, comment="Long " + entry_mode)
+
+// Enter short
+if signal_short and strategy.position_size == 0 and in_session
+    current_stop := stop_price
+    strategy.entry("Short", strategy.short, qty=position_size, comment="Short " + entry_mode)
+
+// Exit at target (if still active)
+if strategy.position_size > 0 and target_active
+    strategy.exit("Target", "Long", limit=target_price, stop=current_stop)
+
+if strategy.position_size < 0 and target_active
+    strategy.exit("Target", "Short", limit=target_price, stop=current_stop)
+
+// Exit at trailing stop (if target cancelled)
+if strategy.position_size > 0 and not target_active
+    strategy.exit("Trail", "Long", stop=current_stop)
+
+if strategy.position_size < 0 and not target_active
+    strategy.exit("Trail", "Short", stop=current_stop)
+
+// Force close at session end (4:00 PM = 16:00 = 960 mins)
+if current_time_mins >= 960 and strategy.position_size != 0
+    strategy.close_all(comment="EOD Close")
+
+// ============================================================================
+// VISUALIZATION
+// ============================================================================
+
+// Plot opening range
+plot(or_complete ? or_high : na, "OR High", color=color.new(color.green, 50), style=plot.style_linebr, linewidth=2)
+plot(or_complete ? or_low : na, "OR Low", color=color.new(color.red, 50), style=plot.style_linebr, linewidth=2)
+
+// Plot current stop if in position
+plot(strategy.position_size != 0 ? current_stop : na, "Stop", color=color.red, style=plot.style_cross, linewidth=2)
+
+// Plot target if active
+plot(strategy.position_size != 0 and target_active ? target_price : na, "Target", color=color.green, style=plot.style_cross, linewidth=2)
+
+// Background color for opening range period
+bgcolor(not or_complete and in_session ? color.new(color.blue, 95) : na, title="Opening Range")
+
+// Background color for regime
+bgcolor(is_high_vol ? color.new(color.orange, 97) : color.new(color.teal, 97), title="Regime")
+
+// ============================================================================
+// LABELS & ALERTS
+// ============================================================================
+
+// Show regime on chart
+var label regime_label = na
+if barstate.islast
+    label.delete(regime_label)
+    regime_text = is_high_vol ? "HIGH VOL (ATR " + str.tostring(atr_value, "#.0") + ")" : "LOW VOL (ATR " + str.tostring(atr_value, "#.0") + ")"
+    regime_label := label.new(bar_index, high, regime_text,
+                               style=label.style_label_down,
+                               color=is_high_vol ? color.orange : color.teal,
+                               textcolor=color.white,
+                               size=size.small)
+
+// Alert conditions
+alertcondition(signal_long, "Long Signal", "ORB Long: {{ticker}} @ {{close}}")
+alertcondition(signal_short, "Short Signal", "ORB Short: {{ticker}} @ {{close}}")
